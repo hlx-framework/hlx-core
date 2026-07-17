@@ -1,0 +1,5 @@
+-cp ../src
+-cp .
+-main Main
+--no-output
+-hl typecheck.hl

@@ -1,0 +1,107 @@
+name: Release
+
+on:
+  push:
+    tags: ["*.*.*"]
+
+jobs:
+  verify-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check tag matches haxelib.json / package.json
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          RUNTIME_VERSION=$(jq -r .version hlx-runtime/haxelib.json)
+          CORE_VERSION=$(jq -r .version package.json)
+          echo "tag=$TAG runtime=$RUNTIME_VERSION core=$CORE_VERSION"
+          if [ "$TAG" != "$RUNTIME_VERSION" ] || [ "$TAG" != "$CORE_VERSION" ]; then
+            echo "::error::Tag $TAG does not match hlx-runtime/haxelib.json ($RUNTIME_VERSION) and/or package.json ($CORE_VERSION). Bump both to $TAG before tagging."
+            exit 1
+          fi
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+
+  native-build:
+    needs: verify-version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: krdlab/setup-haxe@v1
+        with:
+          haxe-version: 4.3.3
+
+      - name: Build libhl64.dll (Release)
+        working-directory: hlx-boot
+        run: |
+          cmake -S . -B build
+          cmake --build build --config Release
+
+      - name: Build hlx-loader.hl
+        working-directory: hlx-loader
+        run: haxe compile.hxml
+
+      - name: Verify build outputs
+        shell: pwsh
+        run: |
+          foreach ($f in @("hlx-boot/build/Release/libhl64.dll", "hlx-loader/build/hlx-loader.hl")) {
+            if (-not (Test-Path $f)) { throw "Build did not produce $f" }
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-outputs
+          path: |
+            hlx-boot/build/Release/libhl64.dll
+            hlx-loader/build/hlx-loader.hl
+
+  package-and-release:
+    needs: [verify-version, native-build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-outputs
+          path: dist/build-outputs
+
+      - name: Assemble release layout
+        env:
+          VERSION: ${{ needs.verify-version.outputs.version }}
+        run: |
+          set -eu
+          PKG="dist/hlx-core-$VERSION"
+          mkdir -p "$PKG/hlx/loader" "$PKG/hlx/mods" "$PKG/hlx/logs"
+          cp dist/build-outputs/hlx-boot/build/Release/libhl64.dll "$PKG/"
+          cp dist/build-outputs/hlx-loader/build/hlx-loader.hl "$PKG/hlx/loader/"
+          (cd "$PKG" && zip -r "../hlx-core-$VERSION.zip" .)
+
+      - name: Extract CHANGELOG section for this version
+        env:
+          VERSION: ${{ needs.verify-version.outputs.version }}
+        run: |
+          awk -v ver="[$VERSION]" '
+            /^## \[/ { if (found) exit; if (index($0, ver)) { found=1; next } }
+            found { print }
+          ' CHANGELOG.md > dist/release_notes.md
+          if [ ! -s dist/release_notes.md ]; then
+            echo "::error::No CHANGELOG.md section found for [$VERSION] - add one before tagging."
+            exit 1
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.verify-version.outputs.version }}
+        run: |
+          gh release create "$VERSION" \
+            "dist/hlx-core-$VERSION.zip" \
+            --title "hlx-core $VERSION" \
+            --notes-file dist/release_notes.md

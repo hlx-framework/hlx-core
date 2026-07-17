@@ -1,0 +1,3 @@
+.tools/user-config.json
+**/build/
+node_modules/

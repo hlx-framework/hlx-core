@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  haxe-compile-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: krdlab/setup-haxe@v1
+        with:
+          haxe-version: 4.3.3
+
+      - name: Compile hlx-loader
+        working-directory: hlx-loader
+        run: haxe compile.hxml
+
+      - name: Typecheck hlx-runtime
+        working-directory: hlx-runtime/typecheck
+        run: haxe compile.hxml
+
+  native-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (CMake + MSVC)
+        working-directory: hlx-boot
+        run: cmake -S . -B build
+
+      - name: Build libhl64.dll (Release)
+        working-directory: hlx-boot
+        run: cmake --build build --config Release
+
+      - name: Verify libhl64.dll was produced
+        shell: pwsh
+        run: |
+          $dll = "hlx-boot/build/Release/libhl64.dll"
+          if (-not (Test-Path $dll)) {
+            throw "Build did not produce $dll"
+          }

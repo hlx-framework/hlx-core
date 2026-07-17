@@ -1,0 +1,12 @@
+{
+  "name": "hlx-runtime",
+  "url": "https://github.com/hlx-framework/hlx-core",
+  "license": "MIT",
+  "tags": ["hashlink", "modding", "runtime"],
+  "description": "Shared runtime and compiler macros for the HLX Modding Framework",
+  "version": "0.0.1",
+  "classPath": "src",
+  "releasenote": "",
+  "contributors": ["hlx-framework"],
+  "dependencies": {}
+}

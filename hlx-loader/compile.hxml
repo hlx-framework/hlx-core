@@ -1,0 +1,3 @@
+-cp src
+-main hlx.Boot
+-hl build/hlx-loader.hl

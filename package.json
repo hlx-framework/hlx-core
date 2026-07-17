@@ -1,0 +1,12 @@
+{
+  "name": "hlx-core",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "setup": "node --disable-warning=ExperimentalWarning --experimental-strip-types .tools/setup.mts",
+    "build": "node --disable-warning=ExperimentalWarning --experimental-strip-types .tools/build.mts",
+    "deploy": "node --disable-warning=ExperimentalWarning --experimental-strip-types .tools/deploy.mts"
+  }
+}
