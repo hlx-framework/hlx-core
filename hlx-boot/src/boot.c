@@ -124,7 +124,16 @@ static void *g_bootTargetFun;
 static bool hlx_mods_loaded_impl(void)
 {
     hlx_log(HLX_LOG_DEBUG, "[hlx-boot] hlx_mods_loaded: running module recovery now");
-    return module_recover(g_bootTargetFun);
+    bool recovered = module_recover(g_bootTargetFun);
+    if (recovered) {
+        /* Eager, once-per-process whole-module New+Call scan for construct_instance_by_name's
+         * type->constructor table - done here, right after recovery succeeds, rather than
+         * lazily on a mod's first `new` call: the scan is inherently whole-module regardless
+         * of which type triggers it, so laziness would buy nothing and would risk a random
+         * hitch mid-gameplay on whichever mod happens to construct something first. */
+        reflection_scan_constructors();
+    }
+    return recovered;
 }
 
 // "P_b": niladic Bool return - leading 'P' is HFUN's own kind marker, not an argument char.

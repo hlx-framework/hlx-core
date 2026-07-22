@@ -42,6 +42,17 @@ class HlxRuntime {
         return null;
     }
 
+    // Live by-name constructor resolution: unlike hlxConstructInstance above, no findex is
+    // baked in here. The native side scans the whole module once, eagerly, at load time
+    // for the same New+Call bytecode pattern ConstructorCollector.cs recovers offline
+    // (HL's `New` opcode is bare allocation with no constructor reference of its own), then
+    // disambiguates a type's candidate findex(es) by matching expectedArgCount (receiver +
+    // declared params) against each candidate's real declared arity. See HxEmitter.EmitConstructorFactory.
+    @:hlNative("std", "hlx_construct_instance_by_name")
+    static function hlxConstructInstanceByName(resolvedType:hl.Bytes, expectedArgCount:Int, argsArray:Dynamic):Dynamic {
+        return null;
+    }
+
     @:hlNative("std", "hlx_install_patch")
     static function hlxInstallPatch(realAddress:hl.Bytes, realType:hl.Bytes, receiverFn:Dynamic):Int {
         return -1;
@@ -119,6 +130,14 @@ class HlxRuntime {
     // Offline equivalent of `new ClassName(args)`, for classes not sharing this module's class identity. Not cached: ctorFindex is already a compile-time constant.
     public static inline function constructInstance(resolvedType:hl.Bytes, ctorFindex:Int, args:Array<Dynamic>):Dynamic {
         return hlxConstructInstance(resolvedType, ctorFindex, args);
+    }
+
+    // Offline equivalent of `new ClassName(args)`, resolved live by name - no baked findex.
+    // Not cached here: the native side owns its own process-wide type->constructor
+    // candidate table (shared across every loaded mod), built once at module load, not a
+    // per-mod Haxe static like typeCache/memberCache above.
+    public static inline function constructInstanceByName(resolvedType:hl.Bytes, expectedArgCount:Int, args:Array<Dynamic>):Dynamic {
+        return hlxConstructInstanceByName(resolvedType, expectedArgCount, args);
     }
 
     public static inline function resolveField(obj:Dynamic, fieldName:String):Dynamic {

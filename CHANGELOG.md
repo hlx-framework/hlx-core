@@ -13,6 +13,13 @@ and bump the version in both `package.json` and `hlx-runtime/haxelib.json` to ma
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-07-22
+
+Constructors for generated wrapper types now survive a game update without the gamelib needing to be regenerated first.
+
+- New instances are found by scanning the loaded game's own bytecode at load time, not a number baked in when the gamelib was generated
+- Falls back to a clear error instead of silently calling the wrong function if a future game build ever makes construction ambiguous
+
 ## [0.0.1] - 2026-07-18
 
 ### Added
