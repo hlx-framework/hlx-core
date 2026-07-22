@@ -7,6 +7,12 @@
 #define HFUN_KIND 10
 /* hl_type_kind value 18 (hashlink/src/hl.h) - compiled Haxe `enum` type. */
 #define HENUM_KIND 18
+/* hl_type_kind value 21 (hashlink/src/hl.h) - compiled Haxe `struct` (not `class`) type; shares
+ * hl_type_obj's layout/union slot with HOBJ_KIND (hashlink/src/code.c's hl_read_type handles
+ * HOBJ/HSTRUCT identically). ConstructorCollector.cs's ObjectType model covers both (see
+ * HLX.Core/Model/HlType.cs) - reflection.c's constructor scan must too, see
+ * IsScannableObjectKind in reflection.c. */
+#define HSTRUCT_KIND 21
 
 typedef struct {
     int kind;

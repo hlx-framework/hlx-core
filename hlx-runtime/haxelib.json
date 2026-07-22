@@ -4,7 +4,7 @@
   "license": "MIT",
   "tags": ["hashlink", "modding", "runtime"],
   "description": "Shared runtime and compiler macros for the HLX Modding Framework",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "classPath": "src",
   "releasenote": "",
   "contributors": ["hlx-framework"],

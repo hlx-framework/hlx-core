@@ -2,11 +2,23 @@
 #include "module.h"
 #include "boot.h"
 #include "hlx_common.h"
+#include "log.h"
 #include <windows.h>
 #include <stdbool.h>
 #include <string.h>
 #include <stdlib.h>
-#include <stdint.h>
+
+/* Real hl_code/hl_function/hl_opcode/hl_type structures - used ONLY by the file-based
+ * constructor scan below (reflection_init_constructor_table and everything under it), which
+ * parses a FRESH, independently-owned copy of hlboot.dat via the vendored hl_code_read
+ * (hlx-boot/vendor/hashlink/, see that directory's README.md). Every OTHER function in this
+ * file reads the LIVE, already-running process's module instead, via the hand-derived
+ * hlx_*_mirror_t structs below - those can't use these real headers because hlx-boot has no
+ * compile-time link to the exact struct layout the ALREADY-RUNNING game's own libhl.dll build
+ * used; here, by contrast, we compiled hl_code_read ourselves, so the real headers are exactly
+ * what we want, and are used directly instead of adding yet another mirror. LIBHL_STATIC
+ * (CMakeLists.txt) keeps hl.h's HL_API as plain `extern`, matching hlcode_shim.c. */
+#include "hlmodule.h"
 
 typedef void *(WINAPI *HlDynCallFn)(void *closure, void **args, int nargs);
 typedef void *(WINAPI *HlGetObjRtFn)(void *ot);
@@ -657,9 +669,12 @@ HLX_NATIVE_EXPORT(hlp_hlx_get_static_companion_instance, "PB_D", get_static_comp
  * element (functions[pos]), so a truncated mirror scales every nonzero index to the wrong
  * byte offset and silently reads garbage from neighboring elements.
  *
- * regs/ops are dereferenced by the constructor scan below (regs as hl_type* per register,
- * per hl_read_function in hashlink/src/code.c; ops as hlx_opcode_mirror_t*, see that struct) -
- * every other consumer of this mirror only ever reads .type/.findex, hence the untyped void*. */
+ * Only .type/.findex are ever read off this LIVE-module mirror (by ResolveFunctionByFindex,
+ * for FilterCandidatesByArgCount/construct_instance/construct_instance_by_name) - hence the
+ * untyped void* for the rest. regs/ops are NOT read through this mirror: the New+Call
+ * constructor scan now walks a FRESH, independently-parsed hl_code (real hl_function/
+ * hl_opcode from vendor/hashlink/hlmodule.h, see reflection_init_constructor_table below),
+ * never the live module's own (potentially freed) ops/regs arena. */
 typedef struct {
     int findex;
     int nregs;
@@ -672,16 +687,6 @@ typedef struct {
     void *obj;
     void *field;
 } hlx_function_mirror_t;
-
-/* Mirrors hl_opcode (hashlink/src/hlmodule.h). `extra`'s meaning depends on `op` - see
- * ExtractCallInfo below, and the Call2 bit-cast trap it documents. */
-typedef struct {
-    int op;
-    int p1;
-    int p2;
-    int p3;
-    int *extra;
-} hlx_opcode_mirror_t;
 
 /* Shared tail of call_resolved/construct_instance: builds a synthetic vclosure (hasValue=0,
  * so hl_dyn_call never unwraps a receiver from it - the receiver, if any, is already
@@ -972,66 +977,120 @@ void *construct_instance(const void *resolvedType, int ctorFindex, void *argsArr
 HLX_NATIVE_EXPORT(hlp_hlx_construct_instance, "PBiD_D", construct_instance)
 
 /* ===================================================================================
- * Live constructor resolution (construct_instance_by_name)
+ * File-based constructor resolution (construct_instance_by_name)
  *
  * HL's `New` opcode is bare allocation with no constructor reference at all - unlike
  * hl_type_obj's proto table (named methods), there is no bytecode-format-level table
  * linking a type to "its constructor". The only signal is a `New dst` followed shortly
  * by a Call-family instruction whose first argument is that same `dst` register.
  *
- * Rather than trust a findex baked in at gamelib-generation time (HLX.GamelibGenerator's
- * ConstructorCollector.cs, doing this exact same scan offline against the SAME bytecode),
- * this scans the whole module ONCE, here, natively, eagerly at module-load time (see
- * reflection_scan_constructors, called from boot.c right after module_recover succeeds).
- * A findex baked in at generation time can silently point at the wrong function after the
- * game recompiles (findex numbering isn't stable across recompiles - the entire premise of
- * every OTHER by-name resolution path in this file); a live scan of the CURRENTLY running
- * module can't have that problem; and since this table is naturally whole-module, it lives
- * here in reflection.c (one shared native DLL across every loaded mod), not per-mod Haxe
- * statics like HlxRuntime.hx's typeCache/memberCache.
+ * SUPERSEDES a former live-process-memory scan (reflection_scan_constructors) that read
+ * hl_code->functions[i].ops/.regs off the CURRENTLY RUNNING module. That was fundamentally
+ * broken: HashLink's own reference host (hashlink/src/main.c) calls hl_code_free(ctx.code)
+ * right after hl_module_init() JIT-compiles the module and BEFORE the module's entrypoint
+ * is even invoked (hl_dyn_call_safe) - and hl_code_free does a real free() on the exact
+ * memory arena backing every function's .ops/.regs (hashlink/src/code.c, gc.c). hlx-boot's
+ * only hook point is an IAT hook on that same hl_dyn_call_safe call (boot.c), so it could
+ * never run before that free already happened, on any run, ever. Empirically, against
+ * Farever's real hlboot.dat, that live scan logged 45566/47195 functions scanned (1629
+ * faulted) and found only 7496 candidate sites - vs. 12913 from an independent, correct
+ * offline parse of the exact same file (ConstructorCollector.cs) - and 2 phantom-ambiguous
+ * types that don't exist offline: textbook freed/reused memory corruption, not a fluke.
  *
- * Ambiguity is resolved by filtering a type's raw candidates by declared arg count
- * (receiver + params) - see FilterCandidatesByArgCount. If 0 or >1 candidates remain after
- * filtering, construct_instance_by_name fails closed (loud hlx_log(HLX_LOG_ERROR, ...), then
- * returns the allocated-but-uninitialized instance, exactly mirroring construct_instance's
- * own existing behavior above when ResolveFunctionByFindex fails) rather than falling back to
- * any generation-time-baked findex: identical bytecode run through this identical heuristic
- * at generation time would have hit the same ambiguity, so ConstructorCollector would never
- * have emitted a baked value for this class to fall back to in the first place; and in the
- * cross-build case where an old baked value WOULD exist (game recompiled since the gamelib was
- * generated), reusing it is actively dangerous, not merely stale - it could point at a
- * completely unrelated function in the new build. Empirically, against Farever's real
- * hlboot.dat, ConstructorCollector reports zero ambiguous classes out of 2391 resolved
- * (TotalCandidateSitesFound=12913, ClassesResolved=2391, ClassesAmbiguous=0) - the arg-count
- * filter here is a hedge against a coincidental collision in some FUTURE recompile, not a
- * fix for a currently observed problem.
+ * FIX: read hlboot.dat directly from disk, fresh, ourselves - a hl_code* built this way is
+ * never touched by the live JIT/GC and is never freed out from under us. hl_code_read
+ * (hashlink/src/code.c, declared in hlmodule.h) is the real, already-correct HashLink
+ * parser, but it is NOT exported by the real libhl.dll any shipped game ships (verified via
+ * objdump -p against Farever's own libhl.dll: 431 hl_* exports, zero hl_code_* or hl_module_* -
+ * code.c/module.c/jit.c/main.c are compiled only into HashLink's `hl` executable target,
+ * never the `libhl` DLL target, so none of it carries an HL_API export marker). So instead
+ * of GetProcAddress-ing it like every other native this file uses, hl_code_read/hl_code_free
+ * are vendored directly into hlx-boot's own build (hlx-boot/vendor/hashlink/, see that
+ * directory's README.md) and called as ordinary in-process functions. The 4 allocator
+ * primitives code.c needs (hl_malloc/hl_zalloc/hl_alloc_init/hl_free) plus a handful of other
+ * small externs (hl_hash_gen/hl_utf8_length/hl_from_utf8/hl_detect_debugger/hlt_void) are
+ * supplied by a private, malloc-backed shim (hlcode_shim.c) rather than resolved from the
+ * real DLL - see that file for the full rationale (short version: this parse tree never
+ * touches the live GC, so routing its allocations through the real allocator would risk a
+ * GC/thread-safety interaction at an unpredictable point in the host process's lifecycle for
+ * zero actual benefit).
+ *
+ * This was verified end-to-end, before being wired in here, against the REAL hlboot.dat in a
+ * throwaway Linux build (hashlink/src/code.c is portable C - only hlx-boot's OWN wrapper code
+ * is Windows-specific): bit-for-bit match against ConstructorCollector.cs's own ground truth
+ * (TotalCandidateSitesFound=12913, ClassesResolved=2391, ClassesAmbiguous=0) - see the
+ * accompanying report for the full numbers, including a genuine (and now fixed, see
+ * IsScannableObjectKind below) pre-existing gap this testing uncovered: this file's type-kind
+ * checks throughout only ever tested HOBJ_KIND, silently excluding HSTRUCT-kind types
+ * (`struct`, not `class`, in Haxe/HL - ConstructorCollector.cs's own ObjectType model covers
+ * both) from the constructor scan - present in the FORMER live scan too, independent of the
+ * freed-memory bug above, and undercounting by 247 sites / 33 classes against the real file.
+ *
+ * Type identity: a register's declared hl_type* in this FRESH, independently-parsed hl_code
+ * will NEVER match the live process's own hl_type* pointers (entirely separate memory) - so
+ * the table here is keyed by the type's NAME (narrowed to ASCII, same convention as every
+ * other by-name path in this file), not by pointer, unlike the former live scan's
+ * hlx_ctor_bucket_t. At construct_instance_by_name call time, the caller's resolvedType is a
+ * LIVE type - its .name is read off that live pointer (safe: .name lives in the module's
+ * surviving code->alloc arena, never the freed falloc one that held ops/regs -
+ * resolve_static_member_by_name above already relies on this same fact reading obj->name off
+ * a live type), narrowed, and used to look up this table. The findex recovered from the
+ * file-parse indexes directly and correctly into the LIVE module's functions_ptrs: findex is
+ * a pure file-format value (read via UINDEX() at parse time, hashlink/src/code.c), identical
+ * between two independent parses of the same file bytes, and ResolveFunctionByFindex below
+ * (unchanged) is exactly what already does that live lookup.
+ *
+ * Timing: no longer coupled to module_recover/hl_dyn_call_safe hook timing at all - this
+ * table is built once, eagerly, right after reflection_resolve_setup succeeds (see boot.c),
+ * independent of whether the game's own entrypoint has run yet.
+ *
+ * Ambiguity is resolved the same way as before: filtering a type's raw candidates by declared
+ * arg count (receiver + params) - see FilterCandidatesByArgCount, unchanged. If 0 or >1
+ * candidates remain after filtering, construct_instance_by_name fails closed (loud
+ * hlx_log(HLX_LOG_ERROR, ...), then returns the allocated-but-uninitialized instance, exactly
+ * mirroring construct_instance's own existing behavior above when ResolveFunctionByFindex
+ * fails) rather than falling back to any generation-time-baked findex.
+ *
+ * Known caveat, not a blocker: HashLink's dev-only --hot-reload path can swap the loaded
+ * module post-launch without touching hlboot.dat on disk. A real Steam-shipped build never
+ * exercises this; not solved here, negligible risk for this framework's actual deployment.
  * =================================================================================== */
 
-/* HL opcode integer values - re-derived independently here (this file has no dependency on
- * the C# model types) from hashlink/src/opcodes.h's OP_BEGIN/OP_END list; cross-checked
- * against this repo's own mirror at HLX.Core/Model/HlOpcode.cs, which agrees. */
-enum {
-    HLX_OP_NEW = 82,
-    HLX_OP_CALL0 = 24,
-    HLX_OP_CALL1 = 25,
-    HLX_OP_CALL2 = 26,
-    HLX_OP_CALL3 = 27,
-    HLX_OP_CALL4 = 28,
-    HLX_OP_CALLN = 29,
-};
+/* Opcode values: use the real hl_op enum (ONew/OCall0../OCallN, vendored hashlink/opcodes.h,
+ * pulled in transitively via this file's own "hlmodule.h" include above) directly, rather
+ * than a locally-declared duplicate set of magic numbers - this file now has real access to
+ * hl_op, so a separate copy would just be redundant and risks silently drifting out of sync
+ * if HashLink's own numbering ever changed. (An earlier draft kept a local HLX_OP_* enum for
+ * this - MSVC correctly flagged it as a real type mismatch, C5286/C5287, comparing/switching
+ * two structurally different enum types that only happened to share numeric values - fixed by
+ * removing the duplicate rather than casting past the warning.) Cross-checked once, for the
+ * record: these values agree with this repo's own independent mirror at
+ * HLX.Core/Model/HlOpcode.cs (New=82, Call0..CallN=24..29). */
 
-/* One class type's raw, deduplicated candidate findex(es) - "raw" because these are NOT
- * yet filtered by declared arg count; that filtering happens per-call in
+/* ConstructorCollector.cs's ObjectType record covers BOTH `obj` (HOBJ) and `struct`
+ * (HSTRUCT) bytecode kinds (see HLX.Core/Model/HlType.cs - IsStruct just flags which).
+ * Verified via the Linux Phase 1 test: checking HOBJ_KIND alone undercounts by 247 candidate
+ * sites / 33 classes against the real hlboot.dat; checking both matches ConstructorCollector's
+ * ground truth exactly (12913/2391/0). HSTRUCT_KIND is declared in module.h alongside the
+ * other kind constants this file already uses. */
+static bool IsScannableObjectKind(int kind)
+{
+    return kind == HOBJ_KIND || kind == HSTRUCT_KIND;
+}
+
+/* One class type's raw, deduplicated candidate findex(es), keyed by narrowed-to-ASCII type
+ * name (see the section header comment above for why name, not pointer). "raw" because these
+ * are NOT yet filtered by declared arg count; that filtering happens per-call in
  * construct_instance_by_name, once the caller's expected arg count is known. */
 typedef struct {
-    void *typePtr;   /* hl_type* identity (same pointer instance as a register's declared type) - NULL means empty slot */
+    char *name; /* owned heap copy, process-lifetime; NULL means empty slot */
     int *findexes;
     int count;
     int capacity;
-} hlx_ctor_bucket_t;
+} hlx_ctor_name_bucket_t;
 
-static hlx_ctor_bucket_t *g_ctorBuckets;
-static int g_ctorTableSize; /* power-of-two slot count; 0 until reflection_scan_constructors runs */
+static hlx_ctor_name_bucket_t *g_ctorNameBuckets;
+static int g_ctorNameTableSize; /* power-of-two slot count; 0 until reflection_init_constructor_table runs */
 static bool g_ctorTableBuilt;
 
 static int NextPow2(int n)
@@ -1041,31 +1100,47 @@ static int NextPow2(int n)
     return p;
 }
 
-/* Open-addressing, linear probing; typePtr==NULL marks an empty slot (never itself a valid
- * hl_type* candidate). createIfMissing==false is used for read-only queries from
- * construct_instance_by_name and must never mutate the table. */
-static hlx_ctor_bucket_t *FindBucket(void *typePtr, bool createIfMissing)
+/* g_hlHashUtf8 is resolved by reflection_resolve_setup, which always runs before this table
+ * is built (see boot.c) - the local fallback only matters if that resolution itself failed,
+ * in which case every OTHER by-name path in this file is already failing closed too. */
+static unsigned int HashNarrowName(const char *name)
 {
-    if (!g_ctorBuckets || g_ctorTableSize <= 0 || !typePtr) return NULL;
-    unsigned int mask = (unsigned int)(g_ctorTableSize - 1);
-    unsigned int h = (unsigned int)(((uintptr_t)typePtr) >> 4) & mask;
-    for (int probe = 0; probe < g_ctorTableSize; probe++) {
+    if (g_hlHashUtf8) return (unsigned int)g_hlHashUtf8(name);
+    unsigned int h = 2166136261u;
+    for (const unsigned char *p = (const unsigned char *)name; *p; p++) {
+        h ^= *p;
+        h *= 16777619u;
+    }
+    return h;
+}
+
+/* Open-addressing, linear probing; name==NULL marks an empty slot. createIfMissing==false is
+ * used for read-only queries from construct_instance_by_name and must never mutate the table. */
+static hlx_ctor_name_bucket_t *FindNameBucket(const char *name, bool createIfMissing)
+{
+    if (!g_ctorNameBuckets || g_ctorNameTableSize <= 0 || !name || !name[0]) return NULL;
+    unsigned int mask = (unsigned int)(g_ctorNameTableSize - 1);
+    unsigned int h = HashNarrowName(name) & mask;
+    for (int probe = 0; probe < g_ctorNameTableSize; probe++) {
         unsigned int idx = (h + probe) & mask;
-        hlx_ctor_bucket_t *b = &g_ctorBuckets[idx];
-        if (b->typePtr == typePtr) return b;
-        if (b->typePtr == NULL) {
+        hlx_ctor_name_bucket_t *b = &g_ctorNameBuckets[idx];
+        if (b->name && strcmp(b->name, name) == 0) return b;
+        if (!b->name) {
             if (!createIfMissing) return NULL;
-            b->typePtr = typePtr;
+            size_t len = strlen(name) + 1;
+            b->name = (char *)malloc(len);
+            if (!b->name) return NULL; /* OOM - AddNameCandidate drops this one candidate rather than crash the scan */
+            memcpy(b->name, name, len);
             return b;
         }
     }
-    /* Table full - sized with headroom in reflection_scan_constructors, should not happen. */
+    /* Table full - sized with headroom in reflection_init_constructor_table, should not happen. */
     return NULL;
 }
 
-static void AddCandidate(void *typePtr, int findex)
+static void AddNameCandidate(const char *name, int findex)
 {
-    hlx_ctor_bucket_t *b = FindBucket(typePtr, true);
+    hlx_ctor_name_bucket_t *b = FindNameBucket(name, true);
     if (!b) return;
     for (int i = 0; i < b->count; i++)
         if (b->findexes[i] == findex) return; /* dedup - mirrors ConstructorCollector.cs's HashSet<int> */
@@ -1084,22 +1159,24 @@ static void AddCandidate(void *typePtr, int findex)
  * handling: args[0] is always o->p3) - CallN alone carries no args inline, so its first
  * arg (if any) is extra[0]. Call2's own first-arg register is p3 too; its use of `extra`
  * for arg2 (not arg1) is the bit-cast trap handled separately, in the arg-COUNT-agnostic
- * candidate resolution below - this function never touches Call2's `extra`. */
-static bool ExtractCallInfo(const hlx_opcode_mirror_t *o, int *outFindex, int *outFirstArgReg)
+ * candidate resolution below - this function never touches Call2's `extra`. Takes the real,
+ * vendored hl_opcode (hlmodule.h) directly - same field shape as the mirror this used to
+ * take, so this logic is reused verbatim, just retargeted. */
+static bool ExtractCallInfo(const hl_opcode *o, int *outFindex, int *outFirstArgReg)
 {
     switch (o->op) {
-        case HLX_OP_CALL0:
+        case OCall0:
             *outFindex = o->p2;
             *outFirstArgReg = -1;
             return true;
-        case HLX_OP_CALL1:
-        case HLX_OP_CALL2:
-        case HLX_OP_CALL3:
-        case HLX_OP_CALL4:
+        case OCall1:
+        case OCall2:
+        case OCall3:
+        case OCall4:
             *outFindex = o->p2;
             *outFirstArgReg = o->p3;
             return true;
-        case HLX_OP_CALLN:
+        case OCallN:
             *outFindex = o->p2;
             *outFirstArgReg = (o->p3 > 0 && o->extra) ? o->extra[0] : -1;
             return true;
@@ -1148,66 +1225,136 @@ static int g_totalCandidateSites; /* diagnostic parity counter with ConstructorC
 
 /* Mirrors ConstructorCollector.cs's FindPairedConstructorCall: callInfo is checked BEFORE
  * the clobber check each iteration, so a call's own same-numbered void-return dst isn't
- * mistaken for a clobber before its args are even inspected. */
-static void ScanFunctionForConstructors(const hlx_function_mirror_t *fn)
+ * mistaken for a clobber before its args are even inspected. Walks the REAL, freshly-parsed
+ * hl_function/hl_opcode/hl_type (vendor/hashlink/hlmodule.h) directly - this hl_code is
+ * never freed mid-scan (unlike the former live scan's target), so no per-op fault handling
+ * is structurally required here the way it was there; ScanFileFunctionsForConstructors below
+ * still wraps the whole loop in SEH anyway, matching this file's general defensive style. */
+static void ScanFileFunctionForConstructors(const hl_function *fn)
 {
     if (!fn->ops || !fn->regs || fn->nops <= 0 || fn->nregs <= 0) return;
-    const hlx_opcode_mirror_t *ops = (const hlx_opcode_mirror_t *)fn->ops;
-    void **regs = (void **)fn->regs; /* hl_type* per register - hl_read_function, hashlink/src/code.c */
 
     for (int i = 0; i < fn->nops; i++) {
-        if (ops[i].op != HLX_OP_NEW) continue;
-        int dstReg = ops[i].p1;
+        if (fn->ops[i].op != ONew) continue;
+        int dstReg = fn->ops[i].p1;
         if ((unsigned)dstReg >= (unsigned)fn->nregs) continue;
-        void *regType = regs[dstReg];
+        hl_type *regType = fn->regs[dstReg];
         if (!regType) continue;
-        hlx_type_mirror_t *t = (hlx_type_mirror_t *)regType;
-        if (t->kind != HOBJ_KIND) continue;
+        if (!IsScannableObjectKind(regType->kind)) continue;
+        /* .obj is the union slot valid for both HOBJ and HSTRUCT (hl.h) - same layout either way. */
+        hl_type_obj *obj = regType->obj;
+        if (!obj || !obj->name) continue;
 
         for (int j = i + 1; j < fn->nops; j++) {
             int findex = -1, firstArgReg = -1;
-            if (ExtractCallInfo(&ops[j], &findex, &firstArgReg) && firstArgReg == dstReg) {
+            if (ExtractCallInfo(&fn->ops[j], &findex, &firstArgReg) && firstArgReg == dstReg) {
                 g_totalCandidateSites++;
-                AddCandidate(regType, findex);
+                char narrowName[256];
+                hlx_narrow_utf16((const unsigned short *)obj->name, narrowName, sizeof(narrowName));
+                AddNameCandidate(narrowName, findex);
                 break;
             }
-            if (WritesRegister(ops[j].op, ops[j].p1, dstReg)) break;
+            if (WritesRegister(fn->ops[j].op, fn->ops[j].p1, dstReg)) break;
         }
     }
 }
 
-void reflection_scan_constructors(void)
+/* Reads hlboot.dat's full contents into a heap buffer via CreateFileA/ReadFile (explicit
+ * FILE_SHARE_READ, matching log.c's own CreateFileA usage elsewhere in this codebase) rather
+ * than a bare fopen - the real risk is negligible (HashLink's own load_code(), hashlink/src/
+ * main.c, does a plain fopen/fread-loop/fclose with no mmap, and its handle is long closed
+ * before hlx-boot ever runs), but this is cheap and matches the defensive posture the rest of
+ * this file already uses. Fails closed (log + return false) on any error - no retry. */
+static bool ReadEntireFile(const char *path, unsigned char **outBuf, DWORD *outSize)
+{
+    HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) {
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] ReadEntireFile: CreateFileA('%s') failed, err=%lu", path, GetLastError());
+        return false;
+    }
+    DWORD size = GetFileSize(h, NULL);
+    if (size == INVALID_FILE_SIZE || size == 0) {
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] ReadEntireFile: GetFileSize('%s') failed or empty, err=%lu", path, GetLastError());
+        CloseHandle(h);
+        return false;
+    }
+    unsigned char *buf = (unsigned char *)malloc(size);
+    if (!buf) {
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] ReadEntireFile: malloc(%lu) failed for '%s'", size, path);
+        CloseHandle(h);
+        return false;
+    }
+    DWORD totalRead = 0;
+    while (totalRead < size) {
+        DWORD chunk = 0;
+        if (!ReadFile(h, buf + totalRead, size - totalRead, &chunk, NULL) || chunk == 0) {
+            hlx_log(HLX_LOG_ERROR, "[hlx-boot] ReadEntireFile: ReadFile('%s') failed at %lu/%lu bytes, err=%lu", path,
+                    totalRead, size, GetLastError());
+            free(buf);
+            CloseHandle(h);
+            return false;
+        }
+        totalRead += chunk;
+    }
+    CloseHandle(h);
+    *outBuf = buf;
+    *outSize = size;
+    return true;
+}
+
+/* Eager, once-per-process build of the name-keyed constructor-candidate table
+ * construct_instance_by_name queries, by parsing hlboot.dat fresh off disk (see the section
+ * header comment above for the full rationale). Call once, as early as convenient - unlike
+ * the former live scan, this has NO dependency on module_recover/hl_dyn_call_safe timing at
+ * all (see boot.c). Safe to call more than once; later calls are a no-op. */
+void reflection_init_constructor_table(void)
 {
     if (g_ctorTableBuilt) {
-        hlx_log(HLX_LOG_DEBUG, "[hlx-boot] reflection_scan_constructors: already built - skipping");
+        hlx_log(HLX_LOG_DEBUG, "[hlx-boot] reflection_init_constructor_table: already built - skipping");
         return;
     }
-    void *codePtr = module_get_code();
-    if (!codePtr) {
-        hlx_log(HLX_LOG_ERROR, "[hlx-boot] reflection_scan_constructors: no live hl_code recovered this run - "
-                "construct_instance_by_name will fail closed for every type until the game is restarted");
+
+    char exeDir[MAX_PATH];
+    GetExeDir(exeDir, MAX_PATH);
+    char bootPath[MAX_PATH];
+    strcpy_s(bootPath, MAX_PATH, exeDir);
+    strcat_s(bootPath, MAX_PATH, "hlboot.dat");
+
+    unsigned char *fileBuf = NULL;
+    DWORD fileSize = 0;
+    if (!ReadEntireFile(bootPath, &fileBuf, &fileSize)) {
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] reflection_init_constructor_table: failed to read '%s' - "
+                "construct_instance_by_name will fail closed for every type", bootPath);
         return;
     }
 
     DWORD startTick = GetTickCount();
-    hlx_code_mirror_t *code = (hlx_code_mirror_t *)codePtr;
+    char *errMsg = NULL;
+    hl_code *code = hl_code_read(fileBuf, (int)fileSize, &errMsg);
+    free(fileBuf); /* hl_code_read copies everything it needs into its own alloc/falloc arenas */
+    if (!code) {
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] reflection_init_constructor_table: hl_code_read('%s') failed: %s - "
+                "construct_instance_by_name will fail closed for every type", bootPath,
+                errMsg ? errMsg : "(no message)");
+        return;
+    }
 
-    g_ctorTableSize = NextPow2(code->ntypes > 0 ? code->ntypes * 2 + 16 : 1024);
-    g_ctorBuckets = (hlx_ctor_bucket_t *)calloc((size_t)g_ctorTableSize, sizeof(hlx_ctor_bucket_t));
-    if (!g_ctorBuckets) {
-        hlx_log(HLX_LOG_ERROR, "[hlx-boot] reflection_scan_constructors: allocation of a %d-slot table failed - "
-                "construct_instance_by_name will fail closed for every type", g_ctorTableSize);
-        g_ctorTableSize = 0;
+    g_ctorNameTableSize = NextPow2(code->ntypes > 0 ? code->ntypes * 2 + 16 : 1024);
+    g_ctorNameBuckets = (hlx_ctor_name_bucket_t *)calloc((size_t)g_ctorNameTableSize, sizeof(hlx_ctor_name_bucket_t));
+    if (!g_ctorNameBuckets) {
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] reflection_init_constructor_table: allocation of a %d-slot table failed - "
+                "construct_instance_by_name will fail closed for every type", g_ctorNameTableSize);
+        g_ctorNameTableSize = 0;
+        hl_code_free(code);
         return;
     }
 
     g_totalCandidateSites = 0;
     int functionsScanned = 0, functionsFaulted = 0;
-    hlx_function_mirror_t *functions = (hlx_function_mirror_t *)code->functions;
     for (int i = 0; i < code->nfunctions; i++) {
         bool ok = true;
         __try {
-            ScanFunctionForConstructors(&functions[i]);
+            ScanFileFunctionForConstructors(&code->functions[i]);
         } __except (EXCEPTION_EXECUTE_HANDLER) {
             ok = false;
         }
@@ -1215,20 +1362,27 @@ void reflection_scan_constructors(void)
     }
 
     int distinctTypesWithCandidates = 0, unambiguousByRawFindex = 0, stillAmbiguousByRawFindex = 0;
-    for (int i = 0; i < g_ctorTableSize; i++) {
-        if (!g_ctorBuckets[i].typePtr) continue;
+    for (int i = 0; i < g_ctorNameTableSize; i++) {
+        if (!g_ctorNameBuckets[i].name) continue;
         distinctTypesWithCandidates++;
-        if (g_ctorBuckets[i].count == 1) unambiguousByRawFindex++; else stillAmbiguousByRawFindex++;
+        if (g_ctorNameBuckets[i].count == 1) unambiguousByRawFindex++; else stillAmbiguousByRawFindex++;
     }
 
     g_ctorTableBuilt = true;
     hlx_log(HLX_LOG_INFO,
-            "[hlx-boot] reflection_scan_constructors: done in %lums - %d/%d function(s) scanned (%d faulted), "
-            "%d New+Call candidate site(s) found, %d distinct type(s) with a candidate "
+            "[hlx-boot] reflection_init_constructor_table: parsed '%s' and scanned in %lums - %d/%d function(s) "
+            "scanned (%d faulted), %d New+Call candidate site(s) found, %d distinct type(s) with a candidate "
             "(%d unambiguous by raw findex alone, %d still ambiguous pending per-call arg-count "
             "filtering in construct_instance_by_name)",
-            (unsigned long)(GetTickCount() - startTick), functionsScanned, code->nfunctions, functionsFaulted,
+            bootPath, (unsigned long)(GetTickCount() - startTick), functionsScanned, code->nfunctions, functionsFaulted,
             g_totalCandidateSites, distinctTypesWithCandidates, unambiguousByRawFindex, stillAmbiguousByRawFindex);
+
+    /* hl_code_free only frees code->falloc (the ops/regs arena, hashlink/src/code.c) - we've
+     * already extracted everything we need (narrowed names + findexes) into
+     * g_ctorNameBuckets, which owns its own copies. code->alloc (types/strings, including
+     * every type's raw .name) is never freed by hl_code_free at all and is simply leaked for
+     * the process's lifetime, matching this being a one-time, load-once structure. */
+    hl_code_free(code);
 }
 
 /* Haxe classes have at most one constructor: any raw candidate whose real declared arg
@@ -1292,24 +1446,52 @@ void *construct_instance_by_name(const void *resolvedType, int expectedArgCount,
     }
 
     if (!g_ctorTableBuilt) {
-        hlx_log(HLX_LOG_ERROR, "[hlx-boot] construct_instance_by_name: constructor table was never built (module "
-                "recovery must not have completed this run) - the allocated instance is returned UNCONSTRUCTED "
-                "(fields left at their zero-initialized default), not null, since hl_alloc_obj itself already succeeded");
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] construct_instance_by_name: constructor table was never built (hlboot.dat "
+                "read/parse must have failed at startup - see earlier log) - the allocated instance is returned "
+                "UNCONSTRUCTED (fields left at their zero-initialized default), not null, since hl_alloc_obj itself "
+                "already succeeded");
         return instance;
     }
 
-    hlx_ctor_bucket_t *bucket = NULL;
+    /* Read resolvedType's kind/name off the LIVE type - safe, same reasoning as
+     * resolve_static_member_by_name above (.name lives in the module's surviving code->alloc
+     * arena). This table is keyed by name, not pointer (see the section header comment), since
+     * a hl_type* from the independently-parsed hlboot.dat can never match a live pointer. */
+    const unsigned short *liveName = NULL;
+    int liveKind = -1;
+    bool nameOk = false;
+    __try {
+        const hlx_type_mirror_t *t = (const hlx_type_mirror_t *)resolvedType;
+        liveKind = t->kind;
+        if (IsScannableObjectKind(t->kind)) {
+            hlx_type_obj_mirror_t *obj = (hlx_type_obj_mirror_t *)t->objPtr;
+            if (obj) liveName = obj->name;
+        }
+        nameOk = true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        nameOk = false;
+    }
+    if (!nameOk || !IsScannableObjectKind(liveKind) || !liveName) {
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] construct_instance_by_name: resolvedType %p is not a readable obj/struct "
+                "type (kind=%d) - the allocated instance is returned UNCONSTRUCTED, not null", resolvedType, liveKind);
+        return instance;
+    }
+
+    char narrowName[256];
+    hlx_narrow_utf16(liveName, narrowName, sizeof(narrowName));
+
+    hlx_ctor_name_bucket_t *bucket = NULL;
     bool lookupOk = false;
     __try {
-        bucket = FindBucket((void *)resolvedType, false);
+        bucket = FindNameBucket(narrowName, false);
         lookupOk = true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         lookupOk = false;
     }
     if (!lookupOk || !bucket || bucket->count == 0) {
-        hlx_log(HLX_LOG_ERROR, "[hlx-boot] construct_instance_by_name: no New+Call constructor candidate was found "
-                "anywhere in the module for type %p - the allocated instance is returned UNCONSTRUCTED, not null",
-                resolvedType);
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] construct_instance_by_name: '%s' - no New+Call constructor candidate was "
+                "found anywhere in hlboot.dat for this type - the allocated instance is returned UNCONSTRUCTED, not null",
+                narrowName);
         return instance;
     }
 
@@ -1318,10 +1500,10 @@ void *construct_instance_by_name(const void *resolvedType, int expectedArgCount,
     void *ctorRealType = NULL;
     int matches = FilterCandidatesByArgCount(bucket->findexes, bucket->count, expectedNargs, &ctorFn, &ctorRealType);
     if (matches != 1) {
-        hlx_log(HLX_LOG_ERROR, "[hlx-boot] construct_instance_by_name: type %p has %d raw New+Call candidate(s) but "
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] construct_instance_by_name: '%s' has %d raw New+Call candidate(s) but "
                 "%d matched the expected arg count %d (receiver + %d declared param(s)) - refusing to guess, the "
                 "allocated instance is returned UNCONSTRUCTED, not null",
-                resolvedType, bucket->count, matches, expectedNargs, expectedArgCount);
+                narrowName, bucket->count, matches, expectedNargs, expectedArgCount);
         return instance;
     }
 
@@ -1329,15 +1511,15 @@ void *construct_instance_by_name(const void *resolvedType, int expectedArgCount,
     void *elements[MAX_DYN_ARGS];
     int ctorArgsLength = 0;
     if (!ResolveDynArgs(argsArray, elements + 1, MAX_DYN_ARGS - 1, &ctorArgsLength)) {
-        hlx_log(HLX_LOG_ERROR, "[hlx-boot] construct_instance_by_name: failed to unpack constructor args - the "
-                "allocated instance is returned UNCONSTRUCTED, not null");
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] construct_instance_by_name: '%s' - failed to unpack constructor args - the "
+                "allocated instance is returned UNCONSTRUCTED, not null", narrowName);
         return instance;
     }
     elements[0] = instance;
 
     InvokeVClosure(ctorFn, ctorRealType, elements, ctorArgsLength + 1); /* return value (always void) discarded */
-    hlx_log(HLX_LOG_DEBUG, "[hlx-boot] construct_instance_by_name: constructed %p (type %p) via live-resolved findex",
-            instance, resolvedType);
+    hlx_log(HLX_LOG_DEBUG, "[hlx-boot] construct_instance_by_name: constructed %p ('%s') via file-resolved findex",
+            instance, narrowName);
     return instance;
 }
 

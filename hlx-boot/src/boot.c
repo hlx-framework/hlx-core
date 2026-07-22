@@ -61,6 +61,13 @@ static void ResolveSetup(void)
     hlx_log(HLX_LOG_DEBUG, "[hlx-boot] libhl.dll base=%p hl_setup=%p (load_plugin field at %p)", (void *)g_realLibhl, (void *)g_setup, (void *)&g_setup->load_plugin);
 
     reflection_resolve_setup(g_realLibhl);
+
+    /* Eager, one-shot build of construct_instance_by_name's constructor table, done by
+     * parsing hlboot.dat directly off disk (reflection.c) - unlike the live-memory scan this
+     * replaced, it has no dependency on module_recover() ever completing, so it belongs here,
+     * right alongside the rest of process-attach-time setup, not later in
+     * hlx_mods_loaded_impl. */
+    reflection_init_constructor_table();
 }
 
 static hlx_vclosure_mirror_t g_registerPrefixClosure;
@@ -125,14 +132,11 @@ static bool hlx_mods_loaded_impl(void)
 {
     hlx_log(HLX_LOG_DEBUG, "[hlx-boot] hlx_mods_loaded: running module recovery now");
     bool recovered = module_recover(g_bootTargetFun);
-    if (recovered) {
-        /* Eager, once-per-process whole-module New+Call scan for construct_instance_by_name's
-         * type->constructor table - done here, right after recovery succeeds, rather than
-         * lazily on a mod's first `new` call: the scan is inherently whole-module regardless
-         * of which type triggers it, so laziness would buy nothing and would risk a random
-         * hitch mid-gameplay on whichever mod happens to construct something first. */
-        reflection_scan_constructors();
-    }
+    /* construct_instance_by_name's constructor table no longer depends on module_recover at
+     * all - it's built from hlboot.dat directly (see ResolveSetup/reflection_init_constructor_table)
+     * well before this function ever runs. module_recover here still matters for everything
+     * ELSE that resolves names/members against the LIVE module (resolve_type_by_name,
+     * ResolveFunctionByFindex, ...), unchanged. */
     return recovered;
 }
 

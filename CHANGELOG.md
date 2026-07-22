@@ -9,9 +9,16 @@ hlx-boot, hlx-loader, and hlx-runtime version together as a single unit.
 
 Add entries under `[Unreleased]` as changes land.
 Before tagging a release, move the `[Unreleased]` entries under a new `[X.Y.Z] - YYYY-MM-DD` heading,
-and bump the version in both `package.json` and `hlx-runtime/haxelib.json` to match the tag — the release workflow checks this and fails otherwise.
+and bump the version in `hlx-runtime/haxelib.json` to match the tag — the release workflow checks this and fails otherwise.
 
 ## [Unreleased]
+
+## [0.0.3] - 2026-07-22
+
+Fixes a reliability bug in 0.0.2's constructor resolution: reading the game's already-running bytecode could intermittently miss or misidentify a constructor, since HashLink frees that data almost immediately after the game starts. Constructors now resolve by reading the game's own hlboot.dat file directly instead, which is both reliable and no longer timing-dependent.
+
+- No longer depends on catching the game's bytecode before HashLink frees it - reads hlboot.dat directly instead
+- Confirmed working end-to-end against a real game run, with every constructor call site resolving correctly
 
 ## [0.0.2] - 2026-07-22
 

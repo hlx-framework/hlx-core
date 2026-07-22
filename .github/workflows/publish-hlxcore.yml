@@ -1,0 +1,53 @@
+name: Publish hlx-core
+
+# Called as the last job of release.yml - not independently triggered.
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+    secrets:
+      NEXUS_CONFIG:
+        required: true
+
+jobs:
+  publish-nexus:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "${{ inputs.version }}" --pattern "hlx-core-*.zip" --dir dist --repo ${{ github.repository }}
+
+      # Secret NEXUS_CONFIG is a single JSON blob:
+      # { "nexus_api_key": "...", "hlx-core": { "nexus_domain": "...", "nexus_mod_id": 0, "nexus_file_group_id": "..." } }
+      - name: Read Nexus config + release notes
+        id: nexus
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEXUS_CONFIG: ${{ secrets.NEXUS_CONFIG }}
+        run: |
+          API_KEY=$(jq -r '.nexus_api_key' <<< "$NEXUS_CONFIG")
+          echo "::add-mask::$API_KEY"
+          echo "api_key=$API_KEY" >> "$GITHUB_OUTPUT"
+          echo "domain=$(jq -r '."hlx-core".nexus_domain' <<< "$NEXUS_CONFIG")" >> "$GITHUB_OUTPUT"
+          echo "mod_id=$(jq -r '."hlx-core".nexus_mod_id' <<< "$NEXUS_CONFIG")" >> "$GITHUB_OUTPUT"
+          echo "file_id=$(jq -r '."hlx-core".nexus_file_group_id' <<< "$NEXUS_CONFIG")" >> "$GITHUB_OUTPUT"
+          {
+            echo "description<<EOF"
+            gh release view "${{ inputs.version }}" --json body -q .body --repo ${{ github.repository }}
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload to Nexus Mods
+        uses: Nexus-Mods/upload-action@v1.0.0-beta.9
+        with:
+          api_key: ${{ steps.nexus.outputs.api_key }}
+          file_id: ${{ steps.nexus.outputs.file_id }}
+          filename: dist/hlx-core-${{ inputs.version }}.zip
+          version: ${{ inputs.version }}
+          display_name: hlx-core ${{ inputs.version }}
+          description: ${{ steps.nexus.outputs.description }}
+          category: main
+          archive_existing_version: true

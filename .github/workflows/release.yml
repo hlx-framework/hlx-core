@@ -12,15 +12,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check tag matches haxelib.json / package.json
+      - name: Check tag matches haxelib.json
         id: version
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
           RUNTIME_VERSION=$(jq -r .version hlx-runtime/haxelib.json)
-          CORE_VERSION=$(jq -r .version package.json)
-          echo "tag=$TAG runtime=$RUNTIME_VERSION core=$CORE_VERSION"
-          if [ "$TAG" != "$RUNTIME_VERSION" ] || [ "$TAG" != "$CORE_VERSION" ]; then
-            echo "::error::Tag $TAG does not match hlx-runtime/haxelib.json ($RUNTIME_VERSION) and/or package.json ($CORE_VERSION). Bump both to $TAG before tagging."
+          echo "tag=$TAG runtime=$RUNTIME_VERSION"
+          if [ "$TAG" != "$RUNTIME_VERSION" ]; then
+            echo "::error::Tag $TAG does not match hlx-runtime/haxelib.json ($RUNTIME_VERSION). Bump it to $TAG before tagging."
             exit 1
           fi
           echo "version=$TAG" >> "$GITHUB_OUTPUT"
@@ -105,3 +104,11 @@ jobs:
             "dist/hlx-core-$VERSION.zip" \
             --title "hlx-core $VERSION" \
             --notes-file dist/release_notes.md
+
+  publish-nexus:
+    needs: [verify-version, package-and-release]
+    uses: ./.github/workflows/publish-hlxcore.yml
+    with:
+      version: ${{ needs.verify-version.outputs.version }}
+    secrets:
+      NEXUS_CONFIG: ${{ secrets.NEXUS_CONFIG }}
