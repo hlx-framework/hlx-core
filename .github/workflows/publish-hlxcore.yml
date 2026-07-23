@@ -51,3 +51,4 @@ jobs:
           description: ${{ steps.nexus.outputs.description }}
           category: main
           archive_existing_version: true
+          update_mod_version: true
