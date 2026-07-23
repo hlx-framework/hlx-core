@@ -88,14 +88,24 @@ static int CompareFunctionAddrs(const void *a, const void *b)
 static void EnsureFunctionBoundaries(void)
 {
     if (g_boundaryBuildAttempted) return;
-    g_boundaryBuildAttempted = true; /* one attempt per process */
 
     void *codePtr = module_get_code();
     void **functionsPtrs = module_get_functions_ptrs();
     if (!codePtr || !functionsPtrs) {
-        hlx_log(HLX_LOG_DEBUG, "[hlx-boot] EnsureFunctionBoundaries: module not recovered yet - cut-point scans will fall back to the fixed maxScan heuristic alone this run");
+        /* Do NOT latch g_boundaryBuildAttempted here. module_recover() runs from
+         * hlx_mods_loaded_impl (boot.c), driven by a native call from the Haxe-side
+         * loader, and is expected to complete before mods start calling install_patch -
+         * but that ordering is enforced outside this file. If EnsureFunctionBoundaries
+         * were ever reached earlier than that (e.g. a mod patching something before the
+         * "mods loaded" signal fires), latching here would have permanently disabled
+         * ALL function-boundary checks - and therefore the fun+12 guard in
+         * PatchFunctionPrologue - for the rest of the process, silently, for every
+         * later patch regardless of target. Retry on every call instead, until module
+         * recovery has actually happened. */
+        hlx_log(HLX_LOG_DEBUG, "[hlx-boot] EnsureFunctionBoundaries: module not recovered yet - cut-point scans will fall back to the fixed maxScan heuristic alone until it is");
         return;
     }
+    g_boundaryBuildAttempted = true; /* one build attempt per process, now that the module is actually available */
 
     int n = ((hlx_code_mirror_t *)codePtr)->nfunctions;
     if (n <= 0) {
@@ -236,6 +246,27 @@ static bool PatchFunctionPrologue(void *targetFun, void *hookFn, TrampolineFn *o
     }
     if (cutLen <= 0) {
         hlx_log(HLX_LOG_ERROR, "[hlx-boot] PatchFunctionPrologue(%s): no safe cut point found - refusing to patch", label);
+        return false;
+    }
+
+    /* FindSafeCutPoint's hardLimit check protects the RELOCATED TRAMPOLINE COPY (cutLen
+     * bytes read starting at fun) from crossing into the next known function. Because
+     * FindSafeCutPoint is always called with minLen=12 here, and its loop only returns
+     * once pos >= minLen, a successful cutLen is always >= 12 - which, combined with the
+     * per-step "fun + pos > hardLimit" check it already performs, happens to also imply
+     * fun + 12 <= hardLimit. But that guarantee is an accidental byproduct of minLen==12
+     * matching the jump-stub size below, not an explicit invariant - nothing enforces
+     * that coupling if either constant ever changes, and it evaporates completely when
+     * hardLimit is NULL (module boundaries not yet available - see
+     * EnsureFunctionBoundaries), in which case FindSafeCutPoint has no boundary check at
+     * all and cutLen success proves nothing about fun+12. The unconditional 12-byte
+     * jump-stub WRITE at the target's OWN address (WriteAbsoluteJumpStub below) has never
+     * had a check of its own distinct from cutLen's - make the requirement explicit here,
+     * and refuse rather than spill into whatever real function is packed immediately
+     * after a too-short target, exactly like FindSafeCutPoint already does for the
+     * trampoline copy. */
+    if (hardLimit && fun + 12 > hardLimit) {
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] PatchFunctionPrologue(%s): the 12-byte jump-stub write at %p would cross the next known function's start (%p) - refusing rather than spilling into it", label, (void *)fun, (void *)hardLimit);
         return false;
     }
 
