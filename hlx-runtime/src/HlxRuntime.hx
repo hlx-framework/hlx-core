@@ -79,6 +79,21 @@ class HlxRuntime {
         return null;
     }
 
+    // Raw vdynamic.v.ptr extraction, no abs_name/hl_same_type check at all - see
+    // reflection.h's unbox_dynamic_ptr for the full rationale. Needed by HookDiscoveryMacro's
+    // generated receivers: hl_dyn_call (used by callOriginal to invoke a hooked function's
+    // real body) always boxes a non-void, non-Dynamic return into a fresh vdynamic, but a
+    // receiver whose own declared return type is Dynamic (forced whenever its prefix/postfix
+    // contributors return Dynamic to route around the same abs_name check on their own end -
+    // see bugs 6/7 in shader-cache's REPORT.md for the concrete case this was found from)
+    // would otherwise hand that box's address back to the real caller instead of the real
+    // pointer. The result of this call is only ever meaningfully `cast` to a concrete
+    // hl.Abstract<...> type at the call site - never used as Dynamic itself.
+    @:hlNative("std", "hlx_unbox_ptr")
+    public static function unboxPointer(d:Dynamic):hl.Bytes {
+        return null;
+    }
+
     static var typeCache = new Map<String, hl.Bytes>();
     static var memberCache = new Map<String, ResolvedMember>();
 

@@ -930,6 +930,19 @@ void *call_resolved(const void *targetFun, const void *realType, void *argsArray
 
 HLX_NATIVE_EXPORT(hlp_hlx_call_resolved, "PBBD_D", call_resolved)
 
+/* See reflection.h for the full rationale. d->v.ptr is the exact same union slot
+ * shadercache.cpp's library_store_graphics already reads off a Dynamic-boxed dx_resource
+ * argument (confirmed working in live testing) - this is that same read, just exposed as its
+ * own native so HookDiscoveryMacro-generated receiver code (plain Haxe, not C++) can do it too,
+ * on the RETURN side, for any hooked target whose real return type is a concrete hl.Abstract. */
+void *unbox_dynamic_ptr(void *dynValue)
+{
+    if (!dynValue) return NULL;
+    return ((vdynamic *)dynValue)->v.ptr;
+}
+
+HLX_NATIVE_EXPORT(hlp_hlx_unbox_ptr, "PD_B", unbox_dynamic_ptr)
+
 /* ctorFindex is baked in at generation time, not resolved by name here: HL's `New` opcode
  * is bare allocation with no constructor reference, so a findex is the only stable identity
  * - and unlike a name, it can shift on any recompile of the game. */

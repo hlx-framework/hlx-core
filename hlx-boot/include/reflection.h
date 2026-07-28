@@ -12,6 +12,19 @@ void *construct_instance_by_name(const void *resolvedType, int expectedArgCount,
 void *call_closure(void *closure, void **args, int nargs);
 void reflection_resolve_setup(void *realLibhlModule);
 
+/* Extracts the raw pointer payload out of a boxed Dynamic value (vdynamic.v.ptr) with NO
+ * abs_name/hl_same_type check at all - the counterpart, on the return-value side, to
+ * shadercache.cpp's own `state->v.ptr` trick for argument Dynamic values (see that file's
+ * comment on library_store_graphics). Needed because hl_dyn_call (used by call_resolved
+ * above to invoke a hooked function's real body) always boxes a non-void, non-Dynamic return
+ * value into a fresh vdynamic for its own generic void* result - so a HookDiscoveryMacro-
+ * generated receiver whose own declared return type is Dynamic (because its prefix/postfix
+ * contributors must use Dynamic to route around the SAME abs_name check on THEIR side, see
+ * hlx-runtime's HookDiscoveryMacro.hx) would otherwise hand the boxed wrapper's address back
+ * to the real caller instead of the real pointer, silently corrupting anything expecting a
+ * concrete hl.Abstract<...>-typed return (e.g. h3d.impl.DX12Driver.makePipeline's dx_resource). */
+void *unbox_dynamic_ptr(void *dynValue);
+
 /* Eager, whole-file New+Call bytecode scan building the name-keyed type->candidate-findex(es)
  * table that construct_instance_by_name queries. Parses hlboot.dat directly off disk (via a
  * vendored hl_code_read, see hlx-boot/vendor/hashlink/) rather than reading the live process's

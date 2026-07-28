@@ -23,11 +23,11 @@ class Boot {
                 trace('skipping $name: no $path');
                 continue;
             }
-            var ok = try Native.loadPlugin(path) catch (e:Dynamic) {
+            var ok = try Native.loadMod(path) catch (e:Dynamic) {
                 trace('mod $path threw during load: $e');
                 false;
             }
-            trace('loadPlugin($path) -> $ok');
+            trace('loadMod($path) -> $ok');
         }
 
         // Only valid once every mod's main() has run.

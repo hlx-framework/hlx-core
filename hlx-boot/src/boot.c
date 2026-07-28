@@ -8,6 +8,112 @@
 #include <stdbool.h>
 #include <string.h>
 
+static void GetPluginsDir(char *outDir, size_t outDirSize)
+{
+    char hlxDir[MAX_PATH];
+    EnsureHlxDir(hlxDir, MAX_PATH);
+    strcpy_s(outDir, outDirSize, hlxDir);
+    strcat_s(outDir, outDirSize, "\\plugins");
+}
+
+static void WidenPluginSearchPath(void)
+{
+    char pluginsDir[MAX_PATH];
+    GetPluginsDir(pluginsDir, MAX_PATH);
+
+    wchar_t pluginsDirW[MAX_PATH];
+    hlx_widen_ascii(pluginsDir, (unsigned short *)pluginsDirW, MAX_PATH);
+
+    if (!SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS)) {
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] WidenPluginSearchPath: SetDefaultDllDirectories failed, err=%lu", GetLastError());
+        return;
+    }
+    if (!AddDllDirectory(pluginsDirW)) {
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] WidenPluginSearchPath: AddDllDirectory failed, err=%lu", GetLastError());
+        return;
+    }
+    hlx_log(HLX_LOG_DEBUG, "[hlx-boot] WidenPluginSearchPath: OK - added %s to DLL search path", pluginsDir);
+}
+
+/* Loads every .hdll found one level down, under plugins/<mod-name>/*.hdll (NOT loose files
+ * directly in plugins/ - each mod gets its own subfolder there, matching stageModDir's own
+ * mods/<mod-name>/ convention; see farever-mods' .tools/lib/paths.mts stagePluginsDir and
+ * .tools/deploy.mts), into loadedCount/failedCount (running totals owned by the caller). */
+static void LoadHdllsInDir(const char *dir, int *loadedCount, int *failedCount)
+{
+    char searchPattern[MAX_PATH];
+    strcpy_s(searchPattern, MAX_PATH, dir);
+    strcat_s(searchPattern, MAX_PATH, "\\*.hdll");
+
+    WIN32_FIND_DATAA findData;
+    HANDLE find = FindFirstFileA(searchPattern, &findData);
+    if (find == INVALID_HANDLE_VALUE) return;
+
+    do {
+        if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+
+        char fullPath[MAX_PATH];
+        strcpy_s(fullPath, MAX_PATH, dir);
+        strcat_s(fullPath, MAX_PATH, "\\");
+        strcat_s(fullPath, MAX_PATH, findData.cFileName);
+
+        HMODULE h = LoadLibraryA(fullPath);
+        if (h) {
+            (*loadedCount)++;
+            hlx_log(HLX_LOG_INFO, "[hlx-boot] LoadPlugin: loaded %s (handle=%p)", fullPath, (void *)h);
+        } else {
+            (*failedCount)++;
+            hlx_log(HLX_LOG_ERROR, "[hlx-boot] LoadPlugin: LoadLibraryA(%s) failed, err=%lu", fullPath, GetLastError());
+        }
+    } while (FindNextFileA(find, &findData));
+
+    FindClose(find);
+}
+
+/* Loads every plugins/<mod-name>/*.hdll by its explicit full path, this early - before
+ * hlx-loader.hl (and therefore every mod's own main()) even loads, let alone anything the game's
+ * own bytecode resolves. This is what lets a plugin's own native .hdll shadow-load a same-named
+ * library the game itself ships (e.g. a proxying dx12.hdll shadowing the real dx12.hdll - see
+ * farever-mods/shader-persistent-cache/NATIVE.md Section 3): Windows satisfies a later bare-name
+ * LoadLibrary/resolve_library("<name>", ...) lookup with whatever module by that name is already
+ * loaded anywhere in the process, regardless of which directory it actually came from - so
+ * forcing every plugin to load from here, unconditionally, makes that race deterministic instead
+ * of depending on some mod's main() happening to run first. Harmless for an ordinary plugin with
+ * no such name collision - LoadLibrary on an already-resolved name later is a no-op, returning
+ * the same handle. */
+static void EagerLoadPluginHdlls(void)
+{
+    char pluginsDir[MAX_PATH];
+    GetPluginsDir(pluginsDir, MAX_PATH);
+
+    char searchPattern[MAX_PATH];
+    strcpy_s(searchPattern, MAX_PATH, pluginsDir);
+    strcat_s(searchPattern, MAX_PATH, "\\*");
+
+    WIN32_FIND_DATAA findData;
+    HANDLE find = FindFirstFileA(searchPattern, &findData);
+    if (find == INVALID_HANDLE_VALUE) {
+        hlx_log(HLX_LOG_DEBUG, "[hlx-boot] LoadPlugin: no per-mod subfolders found in %s", pluginsDir);
+        return;
+    }
+
+    int loaded = 0, failed = 0;
+    do {
+        if (!(findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+        if (strcmp(findData.cFileName, ".") == 0 || strcmp(findData.cFileName, "..") == 0) continue;
+
+        char modPluginsDir[MAX_PATH];
+        strcpy_s(modPluginsDir, MAX_PATH, pluginsDir);
+        strcat_s(modPluginsDir, MAX_PATH, "\\");
+        strcat_s(modPluginsDir, MAX_PATH, findData.cFileName);
+
+        LoadHdllsInDir(modPluginsDir, &loaded, &failed);
+    } while (FindNextFileA(find, &findData));
+
+    FindClose(find);
+    hlx_log(HLX_LOG_DEBUG, "[hlx-boot] LoadPlugin: %d loaded, %d failed (from %s\\*\\*.hdll)", loaded, failed, pluginsDir);
+}
+
 /* Mirrors hl_setup_t field-for-field so load_plugin's offset matches exactly. */
 typedef struct {
     void *file_path;
@@ -243,6 +349,8 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
         OpenGameLog();
         hlx_log(HLX_LOG_INFO, "[hlx-boot] ==== hlx-boot libhl64.dll loaded via resolve_library(\"std\"), pid=%lu ====", GetCurrentProcessId());
         hlx_log(HLX_LOG_INFO, "[hlx-boot] loader.conf: game_trace=%s log_level=%s", ConfigGameTraceEnabled() ? "true" : "false", LogLevelName(ConfigGetLogLevel()));
+        WidenPluginSearchPath();
+        EagerLoadPluginHdlls();
         ResolveSetup();
         InstallIATHook();
     } else if (reason == DLL_PROCESS_DETACH) {

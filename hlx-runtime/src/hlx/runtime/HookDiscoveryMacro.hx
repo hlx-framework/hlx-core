@@ -119,9 +119,19 @@ class HookDiscoveryMacro {
         var key = identity.typeName + "." + identity.methodName;
         var info = targets.get(key);
         if (info == null) {
-            info = { typeName: identity.typeName, methodName: identity.methodName, contributors: [] };
+            info = { typeName: identity.typeName, methodName: identity.methodName, contributors: [], rawReturn: false };
             targets.set(key, info);
         }
+        // Opt-in escape hatch for targets whose real native return type is a concrete pointer
+        // (hl.Abstract<...>) that every contributor here must still declare as Dynamic to avoid
+        // the cross-module abs_name check (see contributorSignature/signaturesMatch below) -
+        // there is no compile-time-visible source of truth for what the real return type
+        // actually is (the target is resolved purely by name, never against a real compiled
+        // type - see extractIdentity's comment - and even a generated gamelib extern typically
+        // erases such abstracts to Dynamic itself, since they aren't directly referenceable
+        // Haxe types), so this can only be a mod-author opt-in, never auto-detected.
+        // See buildTargetCode for what this actually changes.
+        if (field.meta.has(":hlx.rawReturn")) info.rawReturn = true;
         info.contributors.push({ isPrefix: isPrefix, modClass: modClass, field: field, metaPos: entry.pos });
     }
 
@@ -153,6 +163,10 @@ class HookDiscoveryMacro {
 
     static function tpath(name:String):ComplexType {
         return TPath({ pack: [], name: name, params: [] });
+    }
+
+    static function hlBytesType():ComplexType {
+        return TPath({ pack: ["hl"], name: "Bytes", params: [] });
     }
 
     // Not cached in a static var: __init__ runs before its own class's static var initializers, so a cached key would still be null there.
@@ -252,14 +266,40 @@ class HookDiscoveryMacro {
 
         var argExprs = [for (p in canonical.params) (macro $i{p.name})];
         var dispatchCall:Expr = macro HlxRuntime.dispatch($e{newKeyExpr(info)}, [$a{argExprs}]);
-        var bodyExpr:Expr = canonical.retIsVoid ? dispatchCall : macro return $e{dispatchCall};
+
+        var receiverRet:ComplexType;
+        var bodyExpr:Expr;
+        if (canonical.retIsVoid) {
+            receiverRet = canonical.ret;
+            bodyExpr = dispatchCall;
+        } else if (info.rawReturn) {
+            // dispatch()'s result is Dynamic, but the real target's native return type is a
+            // concrete pointer (hl.Abstract<...>) - hl_dyn_call (used by callOriginal to invoke
+            // the real body) always boxes such a value into a fresh vdynamic for its own
+            // generic Dynamic result, so a plain `return dispatchCall` would compile this
+            // receiver's return type as Dynamic too and hand the real caller the boxed
+            // wrapper's address instead of the real pointer - silent corruption, not an
+            // exception (see shader-cache's REPORT.md bugs 6-8 for the concrete case this was
+            // found from, and hlx_unbox_ptr/HlxRuntime.unboxPointer for the extraction itself).
+            // hl.Bytes has the exact same native (bare-pointer, unboxed) calling-convention
+            // representation as any hl.Abstract<...> - unlike Dynamic - so declaring the
+            // receiver's return type as hl.Bytes and returning the unboxed raw pointer makes
+            // the raw machine-code return value correct for the real caller, without this
+            // macro ever needing to know (or being able to determine - the real type is often
+            // not even a referenceable Haxe type) what the target's real return type actually is.
+            receiverRet = hlBytesType();
+            bodyExpr = macro return HlxRuntime.unboxPointer($e{dispatchCall});
+        } else {
+            receiverRet = canonical.ret;
+            bodyExpr = macro return $e{dispatchCall};
+        }
 
         genFields.push({
             name: receiverName,
             access: [AStatic],
             kind: FFun({
                 args: [for (p in canonical.params) { name: p.name, type: p.type }],
-                ret: canonical.ret,
+                ret: receiverRet,
                 expr: macro $b{[bodyExpr]},
             }),
             pos: pos,
@@ -285,6 +325,7 @@ private typedef TargetInfo = {
     typeName: String,
     methodName: String,
     contributors: Array<Contributor>,
+    rawReturn: Bool,
 };
 
 private typedef ContributorSignature = {

@@ -65,8 +65,7 @@ class Native {
         return false;
     }
 
-    // Goes through Sys.getPath, not raw .bytes - hl_sys_load_plugin needs that path-encoding conversion.
-    public static inline function loadPlugin(file:String):Bool {
+    public static inline function loadMod(file:String):Bool {
         return sysLoadPlugin(Sys.getPath(file));
     }
 }

@@ -31,6 +31,13 @@ set_target_properties(hlx-boot PROPERTIES
     PREFIX ""
 )
 
+# Full symbols even in the optimized Release build actually shipped/deployed - standard
+# practice for post-mortem debugging (this is what shipped-with-PDB Release builds always
+# do), not a debug-vs-release tradeoff. Without this, a crash in this DLL is unreadable raw
+# addresses with no way to attach real function names/line numbers after the fact.
+target_compile_options(hlx-boot PRIVATE /Zi)
+target_link_options(hlx-boot PRIVATE /DEBUG /OPT:REF /OPT:ICF)
+
 # code.c/hlcode_shim.c include the vendored hashlink/hl.h - LIBHL_STATIC makes its HL_API
 # macro expand to plain `extern` rather than `__declspec(dllimport)`, so hlcode_shim.c's own
 # definitions of hl_malloc/hl_zalloc/hl_alloc_init/hl_free/etc. don't conflict with importing

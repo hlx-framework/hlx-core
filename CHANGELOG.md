@@ -13,6 +13,21 @@ and bump the version in `hlx-runtime/haxelib.json` to match the tag — the rele
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-07-29
+
+Add native plugin loading, harden module scan, fix hook return corruption
+
+- Support plain .hdll native plugins in hlx/plugins/<mod>/, loaded eagerly
+  before hlx-loader.hl so same-name DLL shadowing resolves deterministically
+- Ship PDB symbols with Release builds for post-mortem crash debugging
+- Rename loadPlugin -> loadMod in Boot/Native to disambiguate from the new
+  native plugin concept
+- Guard FindPrimaryModule's process-wide scan with SEH and bounds checks
+  against reading memory freed mid-scan by another thread
+- Add opt-in rawReturn path for hook receivers whose real return type is a
+  native pointer (hl.Abstract<...>), fixing silent corruption when
+  contributors must declare Dynamic to avoid the abs_name check
+
 ## [0.0.3] - 2026-07-22
 
 Fixes a reliability bug in 0.0.2's constructor resolution: reading the game's already-running bytecode could intermittently miss or misidentify a constructor, since HashLink frees that data almost immediately after the game starts. Constructors now resolve by reading the game's own hlboot.dat file directly instead, which is both reliable and no longer timing-dependent.
