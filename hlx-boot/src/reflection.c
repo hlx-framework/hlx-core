@@ -28,6 +28,7 @@ typedef int(WINAPI *UcmpFn)(const void *a, const void *b);
 typedef void *(WINAPI *HlDynGetpFn)(void *d, int hfield, void *t);
 typedef int(WINAPI *HlHashUtf8Fn)(const char *str);
 typedef void *(WINAPI *HlLookupFindFn)(void *l, int size, int hash);
+typedef void *(WINAPI *HlAllocDynamicFn)(void *t);
 
 static HlDynCallFn g_hlDynCall;
 static HlGetObjRtFn g_hlGetObjRt;
@@ -38,6 +39,7 @@ static HlDynGetpFn g_hlDynGetp;
 static HlHashUtf8Fn g_hlHashUtf8;
 static void *g_hltDynAddr;
 static HlLookupFindFn g_hlLookupFind;
+static HlAllocDynamicFn g_hlAllocDynamic;
 
 void reflection_resolve_setup(void *realLibhlModule)
 {
@@ -51,18 +53,19 @@ void reflection_resolve_setup(void *realLibhlModule)
     g_hlHashUtf8 = (HlHashUtf8Fn)GetProcAddress(m, "hl_hash_utf8");
     g_hltDynAddr = (void *)GetProcAddress(m, "hlt_dyn");
     g_hlLookupFind = (HlLookupFindFn)GetProcAddress(m, "hl_lookup_find");
+    g_hlAllocDynamic = (HlAllocDynamicFn)GetProcAddress(m, "hl_alloc_dynamic");
 
     bool allResolved = g_hlDynCall && g_hlGetObjRt && g_hlGetObjProto && g_hlAllocObj && g_ucmp && g_hlDynGetp &&
-                        g_hlHashUtf8 && g_hltDynAddr && g_hlLookupFind;
+                        g_hlHashUtf8 && g_hltDynAddr && g_hlLookupFind && g_hlAllocDynamic;
     if (allResolved) {
         hlx_log(HLX_LOG_DEBUG, "[hlx-boot] reflection natives resolved OK");
     } else {
         hlx_log(HLX_LOG_ERROR,
                 "[hlx-boot] reflection_resolve_setup: hl_dyn_call=%p hl_get_obj_rt=%p "
                 "hl_get_obj_proto=%p hl_alloc_obj=%p ucmp=%p hl_dyn_getp=%p hl_hash_utf8=%p "
-                "hlt_dyn=%p hl_lookup_find=%p - ONE OR MORE MISSING, reflection natives will fail closed",
+                "hlt_dyn=%p hl_lookup_find=%p hl_alloc_dynamic=%p - ONE OR MORE MISSING, reflection natives will fail closed",
                 (void *)g_hlDynCall, (void *)g_hlGetObjRt, (void *)g_hlGetObjProto, (void *)g_hlAllocObj, (void *)g_ucmp,
-                (void *)g_hlDynGetp, (void *)g_hlHashUtf8, g_hltDynAddr, (void *)g_hlLookupFind);
+                (void *)g_hlDynGetp, (void *)g_hlHashUtf8, g_hltDynAddr, (void *)g_hlLookupFind, (void *)g_hlAllocDynamic);
     }
 }
 
@@ -942,6 +945,40 @@ void *unbox_dynamic_ptr(void *dynValue)
 }
 
 HLX_NATIVE_EXPORT(hlp_hlx_unbox_ptr, "PD_B", unbox_dynamic_ptr)
+
+/* Counterpart to unbox_dynamic_ptr above, going the other way: wraps a raw pointer as a Dynamic
+ * tagged with an arbitrary, caller-supplied hl_type. This is the one piece a cross-module
+ * Dynamic->hl.Abstract<"name"> cast can't get from pure Haxe: hl.Type already exposes everything
+ * needed to compare two abstracts by NAME instead of by hl_same_type's abs_name POINTER identity
+ * (hl.Type.getDynamic/get/getTypeName - see hlx-runtime's HlxRuntime.resolveAbstract, which does
+ * that comparison in plain Haxe), but hl_alloc_dynamic itself is an HL_API-only function, never
+ * exposed via any DEFINE_PRIM in HL's own std - so producing the actual retagged Dynamic still
+ * needs one native call. No name/kind validation happens here at all; resolveAbstract already did
+ * that in Haxe before calling this, so this is pure boxing, and would work identically for any
+ * abstract name - never mentions one.
+ *
+ * targetType is NOT a value this file needs to treat with the same suspicion as resolvedType
+ * elsewhere here (hence no hlx_type_mirror_t/__try wrapping): unlike types recovered by scanning
+ * the live game module's memory via heuristics, targetType comes straight from the CALLING mod's
+ * own compiled module, via hl.Type.get - the exact same JIT/module system that produced every
+ * other real hl_type* this process uses, so the real vendored hl.h struct layout applies exactly
+ * as-is (same reasoning as vdynamic's direct use in unbox_dynamic_ptr above). */
+void *box_dynamic_ptr(void *ptr, void *targetType)
+{
+    if (!g_hlAllocDynamic) {
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] box_dynamic_ptr: hl_alloc_dynamic not resolved - skipping");
+        return NULL;
+    }
+    vdynamic *out = (vdynamic *)g_hlAllocDynamic(targetType);
+    if (!out) {
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] box_dynamic_ptr: hl_alloc_dynamic returned null - skipping");
+        return NULL;
+    }
+    out->v.ptr = ptr;
+    return out;
+}
+
+HLX_NATIVE_EXPORT(hlp_hlx_box_ptr, "PBT_D", box_dynamic_ptr)
 
 /* ctorFindex is baked in at generation time, not resolved by name here: HL's `New` opcode
  * is bare allocation with no constructor reference, so a findex is the only stable identity

@@ -13,6 +13,18 @@ and bump the version in `hlx-runtime/haxelib.json` to match the tag — the rele
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-08-07
+
+Add `HlxRuntime.resolveAbstract` for cross-module native abstract casts
+
+- A `Dynamic` value carrying a native `hl.Abstract<"...">` read off another compiled module (e.g.
+  a gamelib field resolved via reflection) can now be cast to that concrete abstract type - HL's
+  own `hl_same_type` compares abstracts by `abs_name` *pointer* identity, which two independently
+  compiled modules never share even for the same name, so a plain `cast` always failed here before
+- New `hlx-boot` native `box_dynamic_ptr`/`hlx_box_ptr`: re-tags a raw pointer as `Dynamic` under
+  an arbitrary caller-supplied `hl_type`, the one piece of this that pure Haxe can't do
+  (`hl_alloc_dynamic` is HL_API-only, never exposed via a `DEFINE_PRIM`)
+
 ## [0.0.4] - 2026-07-29
 
 Add native plugin loading, harden module scan, fix hook return corruption

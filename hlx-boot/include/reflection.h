@@ -25,6 +25,14 @@ void reflection_resolve_setup(void *realLibhlModule);
  * concrete hl.Abstract<...>-typed return (e.g. h3d.impl.DX12Driver.makePipeline's dx_resource). */
 void *unbox_dynamic_ptr(void *dynValue);
 
+/* Wraps a raw pointer as a Dynamic tagged with an arbitrary, caller-supplied hl_type - see
+ * reflection.c's own comment on box_dynamic_ptr for the full rationale (counterpart to
+ * unbox_dynamic_ptr above; the piece hl.Type itself can't reach, since hl_alloc_dynamic is
+ * HL_API-only). Used by hlx-runtime's HlxRuntime.resolveAbstract to make a cross-module
+ * Dynamic->hl.Abstract<"name"> cast succeed by matching abstract NAME instead of abs_name
+ * pointer identity. */
+void *box_dynamic_ptr(void *ptr, void *targetType);
+
 /* Eager, whole-file New+Call bytecode scan building the name-keyed type->candidate-findex(es)
  * table that construct_instance_by_name queries. Parses hlboot.dat directly off disk (via a
  * vendored hl_code_read, see hlx-boot/vendor/hashlink/) rather than reading the live process's

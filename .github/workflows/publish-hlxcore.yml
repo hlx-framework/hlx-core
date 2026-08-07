@@ -47,7 +47,7 @@ jobs:
           file_id: ${{ steps.nexus.outputs.file_id }}
           filename: dist/hlx-core-${{ inputs.version }}.zip
           version: ${{ inputs.version }}
-          display_name: hlx-core ${{ inputs.version }}
+          display_name: hlx-core
           description: ${{ steps.nexus.outputs.description }}
           category: main
           archive_existing_version: true

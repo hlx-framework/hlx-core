@@ -94,6 +94,39 @@ class HlxRuntime {
         return null;
     }
 
+    // Counterpart to unboxPointer above, going the other way - see reflection.c's own comment
+    // on box_dynamic_ptr for the full native-side rationale.
+    @:hlNative("std", "hlx_box_ptr")
+    static function hlxBoxPtr(ptr:hl.Bytes, target:hl.Type):Dynamic {
+        return null;
+    }
+
+    // Makes a Dynamic value carrying a native hl.Abstract<"..."> (e.g. from resolveField/
+    // resolveMember off a gamelib instance) usable as that concrete abstract type, even though
+    // it was produced by a DIFFERENT compiled module than the caller's. A plain `cast` fails
+    // here: HashLink's hl_same_type compares abstracts by abs_name POINTER identity, and two
+    // independently-compiled modules never share that pointer even for the exact same name
+    // (see hlx-toolkit's GamelibGenerator design notes). This instead compares the name by
+    // STRING CONTENT via hl.Type (the same approach HL's own native-signature loader already
+    // uses for exactly this problem, just applied here to the reflection path instead of the
+    // native-load path), then re-boxes the raw pointer under the CALLER's own hl_type - so the
+    // caller's own (unmodified) cast machinery sees a pointer-identical type and succeeds.
+    //
+    // Must stay `inline`, not a plain generic method: a normal generic function's type parameter
+    // erases to Dynamic in compiled HL bytecode, which would make hl.Type.get(sample) inspect a
+    // boxed runtime value instead of the real static type T. `inline` splices this body into
+    // each concrete call site before that erasure happens, so hl.Type.get(sample) still resolves
+    // correctly there - confirmed empirically; the non-inline version silently breaks this.
+    public static inline function resolveAbstract<T>(d:Dynamic, sample:T):T {
+        if (d == null)
+            return sample;
+        var srcName = hl.Type.getDynamic(d).getTypeName();
+        var dstType = hl.Type.get(sample);
+        if (srcName != dstType.getTypeName())
+            throw 'HlxRuntime.resolveAbstract: expected $srcName to match ${dstType.getTypeName()}';
+        return cast hlxBoxPtr(unboxPointer(d), dstType);
+    }
+
     static var typeCache = new Map<String, hl.Bytes>();
     static var memberCache = new Map<String, ResolvedMember>();
 
