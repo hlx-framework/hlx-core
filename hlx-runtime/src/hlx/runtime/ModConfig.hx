@@ -15,12 +15,30 @@ abstract ModConfig(Void) {
         var path = configPath(modName);
         if (!sys.FileSystem.exists(path)) return defaultValue;
         return try {
-            haxe.Json.parse(sys.io.File.getContent(path));
+            fillDefaults(defaultValue, haxe.Json.parse(sys.io.File.getContent(path)));
         } catch (e:Dynamic) {
             Sys.println('[ModConfig] "$modName": config.json is malformed (${Std.string(e)}) - falling back to the default value');
             defaultValue;
         }
     }
+
+    // A config.json is almost always older than the mod code reading it - a field added (or
+    // moved a level deeper) since the file was last saved must not surface as a null the first
+    // time the mod's own code dot-accesses it. Recurses into plain anon objects only; anything
+    // else in `loaded` (including the right primitive, or a whole branch of the right shape)
+    // is trusted as-is, missing/mistyped branches fall back to `defaultValue` one level at a time.
+    static function fillDefaults(defaultValue:Dynamic, loaded:Dynamic):Dynamic {
+        if (loaded == null) return defaultValue;
+        if (!isPlainObject(defaultValue) || !isPlainObject(loaded)) return loaded;
+
+        var merged = {};
+        for (field in Reflect.fields(defaultValue))
+            Reflect.setField(merged, field, fillDefaults(Reflect.field(defaultValue, field), Reflect.field(loaded, field)));
+        return merged;
+    }
+
+    static inline function isPlainObject(v:Dynamic):Bool
+        return Reflect.isObject(v) && !Std.isOfType(v, String) && !Std.isOfType(v, Array);
 
     public static inline function save<T>(modName:String, value:T):Void {
         if (modName == null) return;

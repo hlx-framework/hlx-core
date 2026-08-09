@@ -13,6 +13,14 @@ and bump the version in `hlx-runtime/haxelib.json` to match the tag — the rele
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-08-10
+
+Fix `@:hlx.config` silently dropping new fields added to a mod's config default after a config.json was already saved
+
+- `ModConfig.load` now recursively merges a loaded `config.json` against the mod's default value instead of using
+  the saved file as-is - a field added (or moved a level deeper) in the mod's code default since the file was last
+  saved was previously surfacing as `null` on first read instead of falling back to the code default
+
 ## [0.0.5] - 2026-08-07
 
 Add `HlxRuntime.resolveAbstract` for cross-module native abstract casts
