@@ -6,6 +6,38 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef void(WINAPI *HlAddRootFn)(void **r);
+typedef void(WINAPI *HlRemoveRootFn)(void **r);
+static HlAddRootFn g_hlAddRoot;
+static HlRemoveRootFn g_hlRemoveRoot;
+
+void hlx_gc_resolve_setup(void *realLibhlModule)
+{
+    HMODULE m = (HMODULE)realLibhlModule;
+    g_hlAddRoot = (HlAddRootFn)GetProcAddress(m, "hl_add_root");
+    g_hlRemoveRoot = (HlRemoveRootFn)GetProcAddress(m, "hl_remove_root");
+    if (!g_hlAddRoot || !g_hlRemoveRoot) {
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] hlx_gc_resolve_setup: hl_add_root=%p hl_remove_root=%p - ONE OR MORE MISSING, GC-root-dependent natives (registry/bus) will fail closed", (void *)g_hlAddRoot, (void *)g_hlRemoveRoot);
+    } else {
+        hlx_log(HLX_LOG_DEBUG, "[hlx-boot] GC root natives resolved OK");
+    }
+}
+
+bool hlx_gc_ready(void)
+{
+    return g_hlAddRoot != NULL && g_hlRemoveRoot != NULL;
+}
+
+void hlx_add_root(void **root)
+{
+    if (g_hlAddRoot) g_hlAddRoot(root);
+}
+
+void hlx_remove_root(void **root)
+{
+    if (g_hlRemoveRoot) g_hlRemoveRoot(root);
+}
+
 void hlx_narrow_utf16(const unsigned short *wide, char *out, int outSize)
 {
     int i = 0;

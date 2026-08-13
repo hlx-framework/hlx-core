@@ -15,6 +15,7 @@ include_directories(vendor/hashlink)
 
 add_library(hlx-boot SHARED
     src/boot.c
+    src/bus.c
     src/config.c
     src/hlcode_shim.c
     src/hlx_common.c
@@ -22,6 +23,7 @@ add_library(hlx-boot SHARED
     src/module.c
     src/patching.c
     src/reflection.c
+    src/registry.c
     src/trampoline.c
     vendor/hashlink/code.c
 )

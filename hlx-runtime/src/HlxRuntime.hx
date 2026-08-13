@@ -36,6 +36,16 @@ class HlxRuntime {
         return null;
     }
 
+    // Enum constructors have no companion-class static method to resolve - hl_type_enum
+    // carries no function pointers at all (unlike hl_type_obj's methods table), only layout
+    // data (per-construct size/offsets/param types). resolveStaticMember/callResolved is the
+    // wrong tool for these; the native side allocates the value directly via hl_alloc_enum +
+    // hl_write_dyn, the same primitives std.Type.createEnum itself is built on.
+    @:hlNative("std", "hlx_construct_enum")
+    static function hlxConstructEnum(resolvedType:hl.Bytes, constructorName:hl.Bytes, argsArray:Dynamic):Dynamic {
+        return null;
+    }
+
     // No by-name resolution for constructors; ctorFindex is a bytecode-recovered constant baked in at generation time (see HxEmitter.EmitConstructorFactory).
     @:hlNative("std", "hlx_construct_instance")
     static function hlxConstructInstance(resolvedType:hl.Bytes, ctorFindex:Int, argsArray:Dynamic):Dynamic {
@@ -173,6 +183,12 @@ class HlxRuntime {
 
     public static inline function callResolved(member:ResolvedMember, args:Array<Dynamic>):Dynamic {
         return member == null ? null : hlxCallResolved(member.address, member.type, args);
+    }
+
+    // Live by-name equivalent of `EnumName.Ctor(args)` for a cross-module enum type - see
+    // hlxConstructEnum's own comment for why this isn't resolveStaticMember/callResolved.
+    public static inline function constructEnum(resolvedType:hl.Bytes, constructorName:String, args:Array<Dynamic>):Dynamic {
+        return hlxConstructEnum(resolvedType, constructorName.bytes, args);
     }
 
     // Offline equivalent of `new ClassName(args)`, for classes not sharing this module's class identity. Not cached: ctorFindex is already a compile-time constant.

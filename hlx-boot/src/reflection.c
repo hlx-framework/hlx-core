@@ -29,6 +29,8 @@ typedef void *(WINAPI *HlDynGetpFn)(void *d, int hfield, void *t);
 typedef int(WINAPI *HlHashUtf8Fn)(const char *str);
 typedef void *(WINAPI *HlLookupFindFn)(void *l, int size, int hash);
 typedef void *(WINAPI *HlAllocDynamicFn)(void *t);
+typedef void *(WINAPI *HlAllocEnumFn)(void *t, int index);
+typedef void(WINAPI *HlWriteDynFn)(void *data, void *t, void *v, bool isTmp);
 
 static HlDynCallFn g_hlDynCall;
 static HlGetObjRtFn g_hlGetObjRt;
@@ -40,6 +42,8 @@ static HlHashUtf8Fn g_hlHashUtf8;
 static void *g_hltDynAddr;
 static HlLookupFindFn g_hlLookupFind;
 static HlAllocDynamicFn g_hlAllocDynamic;
+static HlAllocEnumFn g_hlAllocEnum;
+static HlWriteDynFn g_hlWriteDyn;
 
 void reflection_resolve_setup(void *realLibhlModule)
 {
@@ -54,18 +58,22 @@ void reflection_resolve_setup(void *realLibhlModule)
     g_hltDynAddr = (void *)GetProcAddress(m, "hlt_dyn");
     g_hlLookupFind = (HlLookupFindFn)GetProcAddress(m, "hl_lookup_find");
     g_hlAllocDynamic = (HlAllocDynamicFn)GetProcAddress(m, "hl_alloc_dynamic");
+    g_hlAllocEnum = (HlAllocEnumFn)GetProcAddress(m, "hl_alloc_enum");
+    g_hlWriteDyn = (HlWriteDynFn)GetProcAddress(m, "hl_write_dyn");
 
     bool allResolved = g_hlDynCall && g_hlGetObjRt && g_hlGetObjProto && g_hlAllocObj && g_ucmp && g_hlDynGetp &&
-                        g_hlHashUtf8 && g_hltDynAddr && g_hlLookupFind && g_hlAllocDynamic;
+                        g_hlHashUtf8 && g_hltDynAddr && g_hlLookupFind && g_hlAllocDynamic && g_hlAllocEnum && g_hlWriteDyn;
     if (allResolved) {
         hlx_log(HLX_LOG_DEBUG, "[hlx-boot] reflection natives resolved OK");
     } else {
         hlx_log(HLX_LOG_ERROR,
                 "[hlx-boot] reflection_resolve_setup: hl_dyn_call=%p hl_get_obj_rt=%p "
                 "hl_get_obj_proto=%p hl_alloc_obj=%p ucmp=%p hl_dyn_getp=%p hl_hash_utf8=%p "
-                "hlt_dyn=%p hl_lookup_find=%p hl_alloc_dynamic=%p - ONE OR MORE MISSING, reflection natives will fail closed",
+                "hlt_dyn=%p hl_lookup_find=%p hl_alloc_dynamic=%p hl_alloc_enum=%p hl_write_dyn=%p "
+                "- ONE OR MORE MISSING, reflection natives will fail closed",
                 (void *)g_hlDynCall, (void *)g_hlGetObjRt, (void *)g_hlGetObjProto, (void *)g_hlAllocObj, (void *)g_ucmp,
-                (void *)g_hlDynGetp, (void *)g_hlHashUtf8, g_hltDynAddr, (void *)g_hlLookupFind, (void *)g_hlAllocDynamic);
+                (void *)g_hlDynGetp, (void *)g_hlHashUtf8, g_hltDynAddr, (void *)g_hlLookupFind, (void *)g_hlAllocDynamic,
+                (void *)g_hlAllocEnum, (void *)g_hlWriteDyn);
     }
 }
 
@@ -108,14 +116,24 @@ typedef struct {
     void *parent;
 } hlx_type_fun_mirror_t;
 
-/* Mirrors hl_type_enum's leading fields; name is first (unlike hl_type_obj). Trailing fields
- * (nconstructs/constructs) are read as opaque - only name/global_value are used here. */
+/* Mirrors hl_type_enum's leading fields; name is first (unlike hl_type_obj). */
 typedef struct {
     const unsigned short *name;
     int nconstructs;
     void *constructs;
     void **global_value;
 } hlx_type_enum_mirror_t;
+
+/* Mirrors hl_enum_construct (hashlink/src/hl.h) in full - construct_enum_by_name below needs
+ * every field (nparams/params/offsets), not just name, to allocate+fill a value generically. */
+typedef struct {
+    const unsigned short *name;
+    int nparams;
+    void **params; /* hl_type** */
+    int size;
+    bool hasptr;
+    int *offsets;
+} hlx_enum_construct_mirror_t;
 
 void *resolve_type_by_name(const unsigned short *typeName)
 {
@@ -932,6 +950,101 @@ void *call_resolved(const void *targetFun, const void *realType, void *argsArray
 }
 
 HLX_NATIVE_EXPORT(hlp_hlx_call_resolved, "PBBD_D", call_resolved)
+
+/* Enum constructors have no companion-class static method the way HOBJ's do - hl_type_enum
+ * (hl.h) carries no function pointers at all, only per-construct layout data (name, param
+ * types, byte offsets). HL itself builds these values purely from that layout, via
+ * hl_alloc_enum + a per-param hl_write_dyn (see jit.c's OMakeEnum and types.c's own
+ * hl_alloc_enum_dyn, the exact primitive std.Type.createEnum is built on) - this mirrors that
+ * same sequence instead of trying to resolve/call a "static member" that was never compiled. */
+void *construct_enum_by_name(const void *resolvedType, const unsigned short *ctorName, void *argsArray)
+{
+    if (!resolvedType || !ctorName) {
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] construct_enum_by_name: called with null type/name - returning null");
+        return NULL;
+    }
+    if (!g_ucmp || !g_hlAllocEnum || !g_hlWriteDyn) {
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] construct_enum_by_name: required exports not resolved - returning null");
+        return NULL;
+    }
+
+    char narrow[256];
+    hlx_narrow_utf16(ctorName, narrow, sizeof(narrow));
+
+    int instanceKind = -1;
+    int constructIndex = -1;
+    int nparams = 0;
+    void **paramTypes = NULL;
+    int *offsets = NULL;
+    bool ok = false;
+    __try {
+        const hlx_type_mirror_t *t = (const hlx_type_mirror_t *)resolvedType;
+        instanceKind = t->kind;
+        if (t->kind == HENUM_KIND) {
+            hlx_type_enum_mirror_t *en = (hlx_type_enum_mirror_t *)t->objPtr;
+            if (en && en->constructs) {
+                hlx_enum_construct_mirror_t *constructs = (hlx_enum_construct_mirror_t *)en->constructs;
+                for (int i = 0; i < en->nconstructs; i++) {
+                    if (constructs[i].name && g_ucmp(constructs[i].name, ctorName) == 0) {
+                        constructIndex = i;
+                        nparams = constructs[i].nparams;
+                        paramTypes = constructs[i].params;
+                        offsets = constructs[i].offsets;
+                        break;
+                    }
+                }
+            }
+        }
+        ok = true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        ok = false;
+    }
+    if (!ok) {
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] construct_enum_by_name: '%s' - reading resolvedType faulted - returning null", narrow);
+        return NULL;
+    }
+    if (instanceKind != HENUM_KIND) {
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] construct_enum_by_name: '%s' - resolvedType is not an enum type (kind %d) - returning null", narrow, instanceKind);
+        return NULL;
+    }
+    if (constructIndex < 0) {
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] construct_enum_by_name: '%s' - no such constructor on this enum type - returning null", narrow);
+        return NULL;
+    }
+
+    void *elements[MAX_DYN_ARGS];
+    int length = 0;
+    if (!ResolveDynArgs(argsArray, elements, MAX_DYN_ARGS, &length)) {
+        return NULL;
+    }
+    if (length != nparams) {
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] construct_enum_by_name: '%s' - constructor takes %d param(s), got %d arg(s) - returning null", narrow, nparams, length);
+        return NULL;
+    }
+
+    void *result = NULL;
+    ok = false;
+    __try {
+        void *e = g_hlAllocEnum((void *)resolvedType, constructIndex);
+        if (e) {
+            for (int i = 0; i < nparams; i++)
+                g_hlWriteDyn((char *)e + offsets[i], paramTypes[i], elements[i], false);
+            result = e;
+        }
+        ok = true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        ok = false;
+    }
+    if (!ok) {
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] construct_enum_by_name: '%s' - hl_alloc_enum/hl_write_dyn faulted - returning null", narrow);
+        return NULL;
+    }
+
+    hlx_log(HLX_LOG_DEBUG, "[hlx-boot] construct_enum_by_name: '%s' -> %p", narrow, result);
+    return result;
+}
+
+HLX_NATIVE_EXPORT(hlp_hlx_construct_enum, "PBBD_D", construct_enum_by_name)
 
 /* See reflection.h for the full rationale. d->v.ptr is the exact same union slot
  * shadercache.cpp's library_store_graphics already reads off a Dynamic-boxed dx_resource

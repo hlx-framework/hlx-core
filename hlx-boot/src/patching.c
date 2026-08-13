@@ -41,6 +41,17 @@ static int DecodeSafeInstruction(const unsigned char *p)
 
     if (!hasSseprefix && p[i] >= 0x50 && p[i] <= 0x57) return i + 1;
 
+    /* MOV r32/r64, imm (0xB8+reg): register-in-opcode form, no ModRM/SIB/displacement at
+     * all, so relocating it is always safe. This is the single most common instruction a
+     * trivial getter's cut-point scan needs and previously had no case for at all - HL's
+     * JIT loads the absolute address of any global/static value as a baked-in immediate
+     * here before dereferencing it, right after the "push rbp; mov rbp,rsp; sub rsp,N"
+     * preamble, so any one-line getter touching a static field hit an unrecognized byte
+     * this early and failed the scan outright (confirmed against real JIT output for
+     * lib.Input.allBlocked's shape - see patching bug notes). */
+    if (!hasSseprefix && p[i] >= 0xB8 && p[i] <= 0xBF)
+        return i + 1 + (hasRex && (rex & 0x08) ? 8 : 4);
+
     if (!hasSseprefix && hasRex && (rex & 0x08) && (p[i] == 0x89 || p[i] == 0x8B)) {
         int extra = ModRMExtraBytes(p[i + 1]);
         if (extra < 0) return 0;
@@ -204,7 +215,18 @@ static void DumpPrologueBytes(const void *fun, int len)
 
 static bool BuildTrampoline(const unsigned char *fun, int cutLen, TrampolineFn *outTrampoline)
 {
-    int totalLen = cutLen + 12;
+    /* 14, not 12: this resume-jump MUST be WriteRegisterSafeJumpStub, not
+     * WriteAbsoluteJumpStub - the cutLen bytes just copied ahead of it were only
+     * vetted by DecodeSafeInstruction for "safe to relocate" (no self-relative
+     * operands), not for "leaves no register live that the resumed original code
+     * depends on". A whitelisted `mov r64,imm` (e.g. loading a global's address)
+     * can leave exactly that register live for the very next original instruction
+     * to read - WriteAbsoluteJumpStub's "mov rax,target; jmp rax" would clobber it
+     * first, corrupting the resumed function instead of raising anything at
+     * install time (the corruption only surfaces as an access violation the first
+     * time the patched function actually runs). See WriteRegisterSafeJumpStub's
+     * own comment in trampoline.h. */
+    int totalLen = cutLen + 14;
     void *buf = JitAlloc(totalLen);
     if (!buf) return false;
     bool copyOk = true;
@@ -217,7 +239,7 @@ static bool BuildTrampoline(const unsigned char *fun, int cutLen, TrampolineFn *
         VirtualFree(buf, 0, MEM_RELEASE);
         return false;
     }
-    WriteAbsoluteJumpStub((unsigned char *)buf + cutLen, fun + cutLen);
+    WriteRegisterSafeJumpStub((unsigned char *)buf + cutLen, fun + cutLen);
     *outTrampoline = (TrampolineFn)buf;
     return true;
 }

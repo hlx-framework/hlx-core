@@ -33,3 +33,12 @@ void WriteAbsoluteJumpStub(unsigned char *at, const void *target)
     int pos = JitEmitMovImm64(at, 0, JIT_REG_RAX, (unsigned long long)(uintptr_t)target);
     JitEmitJmpRax(at, pos);
 }
+
+void WriteRegisterSafeJumpStub(unsigned char *at, const void *target)
+{
+    unsigned long long addr = (unsigned long long)(uintptr_t)target;
+    at[0] = 0xFF; /* JMP */
+    at[1] = 0x25; /* ModRM: mod=00, reg=100(/4=JMP), rm=101 -> RIP-relative, disp32 follows */
+    at[2] = 0; at[3] = 0; at[4] = 0; at[5] = 0; /* disp32=0: target address is the very next byte */
+    for (int i = 0; i < 8; i++) at[6 + i] = (unsigned char)(addr >> (8 * i));
+}

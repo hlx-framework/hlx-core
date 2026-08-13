@@ -13,6 +13,39 @@ and bump the version in `hlx-runtime/haxelib.json` to match the tag — the rele
 
 ## [Unreleased]
 
+## [0.0.7] - 2026-08-14
+
+Add `Registry`, a generic bucket/key/value store for sharing retained state across isolated mods
+
+- New `hlx-runtime` API `hlx.runtime.Registry` (`register`/`unregister`/`get`/`list`), Phase 1
+  ("Core Registry") of `plans/CORE-SHARED-BUS-REGISTRY.md` - lets mods, each compiled into their
+  own separate HL module sharing no Haxe statics, discover and read each other's state (e.g. a mod
+  registering itself under the `mods` bucket as `{id, name, version}`)
+- New `hlx-boot` natives (`registry.c`, `hlx_kv_register`/`_unregister`/`_get`/`_count`/`_value_at`)
+  back the store once per process, rooting each registered `Dynamic` value with `hl_add_root` so
+  it survives independently of the registering mod's own module lifetime; re-registering the same
+  `(bucket, key)` replaces the existing entry rather than duplicating it
+- No pub/sub or event semantics - purely retained key/value state; the separate Message Bus
+  (Phase 2) is not part of this change
+
+Add `Bus`, a transient publish/subscribe mechanism for cross-mod notifications
+
+- New `hlx-runtime` API `hlx.runtime.Bus` (`publish`/`subscribe`/`unsubscribe`), Phase 2 ("Core
+  Message Bus") of `plans/CORE-SHARED-BUS-REGISTRY.md` - lets one mod notify others of a transient
+  event (e.g. a chat mod publishing `"command.execute"` for whichever mod owns that command to
+  react to) without either side knowing about the other's module
+- New `hlx-boot` natives (`bus.c`, `hlx_bus_publish`/`_subscribe`/`_unsubscribe`) dispatch a topic's
+  current subscribers, in registration order, via `hl_dyn_call`, passing `payload` as the
+  handler's one argument; re-subscribing the same (topic, handler) replaces the existing
+  subscription instead of accumulating a duplicate, the same re-init safety net `Registry.register`
+  already gives named entries, adapted here to a handler's code address + receiver since
+  `subscribe` has no separate key of its own
+- No RPC, responses, queues, priorities, or delivery guarantees - a topic can have any number of
+  subscribers, but publish/subscribe carry no acknowledgement or ordering promise beyond
+  registration order
+- `hlx_common.c` now resolves `hl_add_root`/`hl_remove_root` once (`hlx_gc_resolve_setup`), shared
+  by both `registry.c` and `bus.c`, rather than each resolving its own copy
+
 ## [0.0.6] - 2026-08-10
 
 Fix `@:hlx.config` silently dropping new fields added to a mod's config default after a config.json was already saved

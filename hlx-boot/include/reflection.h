@@ -7,6 +7,9 @@ void *resolve_static_member_by_name(const void *resolvedType, const unsigned sho
 void *get_static_companion_instance(const void *resolvedType);
 void *alloc_instance(const void *resolvedType);
 void *call_resolved(const void *targetFun, const void *realType, void *argsArray);
+/* Live by-name equivalent of `EnumName.Ctor(args)` for an enum resolved from another module -
+ * see reflection.c's own comment for why this can't reuse resolve_static_member_by_name. */
+void *construct_enum_by_name(const void *resolvedType, const unsigned short *ctorName, void *argsArray);
 void *construct_instance(const void *resolvedType, int ctorFindex, void *argsArray);
 void *construct_instance_by_name(const void *resolvedType, int expectedArgCount, void *argsArray);
 void *call_closure(void *closure, void **args, int nargs);

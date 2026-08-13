@@ -167,6 +167,7 @@ static void ResolveSetup(void)
     hlx_log(HLX_LOG_DEBUG, "[hlx-boot] libhl.dll base=%p hl_setup=%p (load_plugin field at %p)", (void *)g_realLibhl, (void *)g_setup, (void *)&g_setup->load_plugin);
 
     reflection_resolve_setup(g_realLibhl);
+    hlx_gc_resolve_setup(g_realLibhl); /* shared by registry.c and bus.c - see hlx_common.h */
 
     /* Eager, one-shot build of construct_instance_by_name's constructor table, done by
      * parsing hlboot.dat directly off disk (reflection.c) - unlike the live-memory scan this
