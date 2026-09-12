@@ -13,6 +13,14 @@ and bump the version in `hlx-runtime/haxelib.json` to match the tag — the rele
 
 ## [Unreleased]
 
+Show a clear in-game error and exit cleanly when the game's bytecode version isn't supported
+
+- `reflection_init_constructor_table` (`hlx-boot`) now shows a `MessageBoxA` naming the
+  unsupported bytecode version and inviting the user to disable the hlx-core mod - via mod
+  manager, or by deleting `libhl64.dll` - before terminating the process with `ExitProcess(1)`,
+  instead of logging the failure and silently leaving `construct_instance_by_name` failing
+  closed for every type
+
 ## [0.0.7] - 2026-08-14
 
 Add `Registry`, a generic bucket/key/value store for sharing retained state across isolated mods

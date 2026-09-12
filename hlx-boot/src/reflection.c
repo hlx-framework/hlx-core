@@ -1492,10 +1492,24 @@ void reflection_init_constructor_table(void)
     }
 
     DWORD startTick = GetTickCount();
+    int bytecodeVersion = fileSize >= 4 ? (int)fileBuf[3] : -1;
     char *errMsg = NULL;
     hl_code *code = hl_code_read(fileBuf, (int)fileSize, &errMsg);
     free(fileBuf); /* hl_code_read copies everything it needs into its own alloc/falloc arenas */
     if (!code) {
+        if (errMsg && strcmp(errMsg, "Unsupported bytecode version") == 0) {
+            hlx_log(HLX_LOG_ERROR, "[hlx-boot] reflection_init_constructor_table: hl_code_read('%s') failed: "
+                    "unsupported bytecode version %d", bootPath, bytecodeVersion);
+            char msg[512];
+            sprintf_s(msg, sizeof(msg),
+                    "This build of the hlx-core mod does not support the current version of the game "
+                    "(bytecode version %d).\n\n"
+                    "Please disable the hlx-core mod - either through your mod manager (e.g. Vortex) or by "
+                    "deleting libhl64.dll from the game folder - until support for this version is added.",
+                    bytecodeVersion);
+            MessageBoxA(NULL, msg, "hlx-core: unsupported game version", MB_OK | MB_ICONERROR);
+            ExitProcess(1);
+        }
         hlx_log(HLX_LOG_ERROR, "[hlx-boot] reflection_init_constructor_table: hl_code_read('%s') failed: %s - "
                 "construct_instance_by_name will fail closed for every type", bootPath,
                 errMsg ? errMsg : "(no message)");
