@@ -13,6 +13,8 @@ and bump the version in `hlx-runtime/haxelib.json` to match the tag — the rele
 
 ## [Unreleased]
 
+## [0.0.8] - 2026-09-13
+
 Show a clear in-game error and exit cleanly when the game's bytecode version isn't supported
 
 - `reflection_init_constructor_table` (`hlx-boot`) now shows a `MessageBoxA` naming the
@@ -20,6 +22,30 @@ Show a clear in-game error and exit cleanly when the game's bytecode version isn
   manager, or by deleting `libhl64.dll` - before terminating the process with `ExitProcess(1)`,
   instead of logging the failure and silently leaving `construct_instance_by_name` failing
   closed for every type
+
+Support the new game version's HashLink 2.0 bytecode format alongside the current one, from the same build
+
+- `hlx-boot`'s vendored HashLink reader (`vendor/hashlink/`) updated from HashLink 1.16 (bytecode
+  version 4) to 2.0 (bytecode version 6) - both versions parse correctly from the same build since
+  HashLink's own reader is already runtime-gated on `c->version`, not a hardcoded one-version reader
+- `ResolveFunctionByFindex`'s live-module function mirror (`hlx_function_mirror_t`) now branches on
+  the running game's actual bytecode version before reading `.type` - real `hl_function` gained two
+  new fields (`nassigns`/`assigns`) in the 2.0 layout, which silently shifted every field after them;
+  reading the old fixed offsets against a 2.0 game would have corrupted `construct_instance`/
+  `construct_instance_by_name` resolution instead of failing loudly
+- Same fix applied to the `hl_setup` live mirror that gates loading `hlx-loader.hl` - `hl_setup_t`
+  also gained a field (`capture_break_context`) shifting `load_plugin`'s offset in the 2.0 layout
+
+Include the patched function's name in patch-installation failure logs
+
+- `install_patch` (`hlx-boot`) now takes the target's qualified type+method name and includes it
+  in every `PatchFunctionPrologue` log line (e.g. "no safe cut point found"), replacing the
+  previous bare `patch#12` index - lets a native-side patch failure be matched directly to its
+  corresponding `hlx-loader` log line without counting registrations
+- `hlx-loader`'s `Native.installPatch` extern gained the matching `label` parameter, and
+  `Registry.installAllPendingPatches` now passes the target's `PatchTargetKey` string through -
+  needed its own `@:access(String)` on `Registry` to reach `String.bytes` for that conversion,
+  the same access `Native.hx` already grants itself for its other by-name native calls
 
 ## [0.0.7] - 2026-08-14
 

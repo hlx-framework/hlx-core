@@ -14,6 +14,7 @@ void *construct_instance(const void *resolvedType, int ctorFindex, void *argsArr
 void *construct_instance_by_name(const void *resolvedType, int expectedArgCount, void *argsArray);
 void *call_closure(void *closure, void **args, int nargs);
 void reflection_resolve_setup(void *realLibhlModule);
+int reflection_get_bytecode_version(void);
 
 /* Extracts the raw pointer payload out of a boxed Dynamic value (vdynamic.v.ptr) with NO
  * abs_name/hl_same_type check at all - the counterpart, on the return-value side, to

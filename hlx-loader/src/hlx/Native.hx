@@ -51,7 +51,7 @@ class Native {
     }
 
     @:hlNative("std", "hlx_install_patch")
-    public static function installPatch(realAddress:hl.Bytes, realType:hl.Bytes, receiverFn:Dynamic):Int {
+    public static function installPatch(realAddress:hl.Bytes, realType:hl.Bytes, receiverFn:Dynamic, label:hl.Bytes):Int {
         return -1;
     }
 

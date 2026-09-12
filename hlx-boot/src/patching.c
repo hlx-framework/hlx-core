@@ -321,7 +321,7 @@ typedef struct {
 static PatchEntry g_patches[MAX_PATCHES];
 static int g_patchCount = 0;
 
-int install_patch(void *realAddress, const void *realType, void *receiverFn)
+int install_patch(void *realAddress, const void *realType, void *receiverFn, const unsigned short *label)
 {
     if (!realAddress || !receiverFn) {
         hlx_log(HLX_LOG_ERROR, "[hlx-boot] install_patch: called with a null realAddress/receiverFn - ignoring");
@@ -340,8 +340,13 @@ int install_patch(void *realAddress, const void *realType, void *receiverFn)
         return -1;
     }
 
-    char label[32];
-    wsprintfA(label, "patch#%d", g_patchCount);
+    char narrowLabel[256];
+    narrowLabel[0] = '\0';
+    if (label) hlx_narrow_utf16(label, narrowLabel, sizeof(narrowLabel));
+
+    char fullLabel[288];
+    if (narrowLabel[0]) wsprintfA(fullLabel, "patch#%d %s", g_patchCount, narrowLabel);
+    else wsprintfA(fullLabel, "patch#%d", g_patchCount);
 
     hlx_vclosure_mirror_t *receiverClosure = (hlx_vclosure_mirror_t *)receiverFn;
     void *receiverCode = receiverClosure->fun;
@@ -351,7 +356,7 @@ int install_patch(void *realAddress, const void *realType, void *receiverFn)
     }
 
     TrampolineFn trampoline = NULL;
-    if (!PatchFunctionPrologue(realAddress, receiverCode, &trampoline, label)) {
+    if (!PatchFunctionPrologue(realAddress, receiverCode, &trampoline, fullLabel)) {
         return -1;
     }
 
@@ -372,5 +377,5 @@ void *call_original(int handle, void *argsArray)
     return call_resolved((void *)e->trampoline, e->realType, argsArray);
 }
 
-HLX_NATIVE_EXPORT(hlp_hlx_install_patch, "PBBD_i", install_patch)
+HLX_NATIVE_EXPORT(hlp_hlx_install_patch, "PBBDB_i", install_patch)
 HLX_NATIVE_EXPORT(hlp_hlx_call_original, "PiD_D", call_original)

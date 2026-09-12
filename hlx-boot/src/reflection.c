@@ -709,6 +709,28 @@ typedef struct {
     void *field;
 } hlx_function_mirror_t;
 
+typedef struct {
+    int findex;
+    int nregs;
+    int nops;
+    int ref;
+    int nassigns;
+    void *type;
+    void *regs;
+    void *ops;
+    void *debug;
+    void *assigns;
+    void *obj;
+    void *field;
+} hlx_function_mirror_v6_t;
+
+static int g_hlBytecodeVersion = -1;
+
+int reflection_get_bytecode_version(void)
+{
+    return g_hlBytecodeVersion;
+}
+
 /* Shared tail of call_resolved/construct_instance: builds a synthetic vclosure (hasValue=0,
  * so hl_dyn_call never unwraps a receiver from it - the receiver, if any, is already
  * elements[0]) and invokes it. */
@@ -759,9 +781,14 @@ static bool ResolveFunctionByFindex(int findex, void **outFn, void **outRealType
             if (!fn || pos < 0 || pos >= code->nfunctions) {
                 ok = false;
             } else {
-                hlx_function_mirror_t *functions = (hlx_function_mirror_t *)code->functions;
                 *outFn = fn;
-                *outRealType = functions[pos].type;
+                if (g_hlBytecodeVersion >= 6) {
+                    hlx_function_mirror_v6_t *functions = (hlx_function_mirror_v6_t *)code->functions;
+                    *outRealType = functions[pos].type;
+                } else {
+                    hlx_function_mirror_t *functions = (hlx_function_mirror_t *)code->functions;
+                    *outRealType = functions[pos].type;
+                }
                 ok = true;
             }
         }
@@ -1493,6 +1520,7 @@ void reflection_init_constructor_table(void)
 
     DWORD startTick = GetTickCount();
     int bytecodeVersion = fileSize >= 4 ? (int)fileBuf[3] : -1;
+    g_hlBytecodeVersion = bytecodeVersion;
     char *errMsg = NULL;
     hl_code *code = hl_code_read(fileBuf, (int)fileSize, &errMsg);
     free(fileBuf); /* hl_code_read copies everything it needs into its own alloc/falloc arenas */

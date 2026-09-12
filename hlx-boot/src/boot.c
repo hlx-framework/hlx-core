@@ -136,6 +136,28 @@ typedef struct {
     bool is_debugger_attached;
 } hlx_setup_mirror_t;
 
+typedef struct {
+    void *file_path;
+    void *sys_args;
+    int sys_nargs;
+    void *throw_jump;
+    void *resolve_symbol;
+    void *capture_stack;
+    void *capture_break_context;
+    void *reload_check;
+    void *static_call;
+    void *get_wrapper;
+    void *profile_event;
+    void *before_exit;
+    void *vtune_init;
+    void *load_plugin;
+    void *resolve_type;
+    bool static_call_ref;
+    int closure_stack_capture;
+    bool is_debugger_enabled;
+    bool is_debugger_attached;
+} hlx_setup_mirror_v6_t;
+
 static const char *LogLevelName(HlxLogLevel level)
 {
     switch (level) {
@@ -258,7 +280,10 @@ static void *WINAPI HookedHlDynCallSafe(void *closure, void **args, int nargs, v
         hlx_vclosure_mirror_t *orig = (hlx_vclosure_mirror_t *)closure;
         g_bootTargetFun = orig->fun;
         hlx_log(HLX_LOG_DEBUG, "[hlx-boot] HookedHlDynCallSafe FIRED (boot call), target=%p", g_bootTargetFun);
-        if (g_realLibhl && g_setup && g_setup->load_plugin) {
+        bool hasLoadPlugin = g_setup && (reflection_get_bytecode_version() >= 6
+            ? ((hlx_setup_mirror_v6_t *)g_setup)->load_plugin != NULL
+            : g_setup->load_plugin != NULL);
+        if (g_realLibhl && hasLoadPlugin) {
             HlSysLoadPluginFn loadPlugin = (HlSysLoadPluginFn)GetProcAddress(g_realLibhl, "hl_sys_load_plugin");
             if (loadPlugin) {
                 PushModuleName("hlx-loader");

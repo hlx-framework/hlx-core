@@ -26,6 +26,7 @@ typedef PatchTarget = {
     trampolineHandle: Int
 };
 
+@:access(String)
 class Registry {
     public static var registry = new Map<PatchTargetKey, PatchTarget>();
 
@@ -64,7 +65,7 @@ class Registry {
                 continue;
             }
 
-            var handle = Native.installPatch(resolved.address, resolved.type, target.receiver);
+            var handle = Native.installPatch(resolved.address, resolved.type, target.receiver, key.toString().bytes);
             if (handle < 0) {
                 trace('install: install_patch failed for ${key}');
                 continue;
