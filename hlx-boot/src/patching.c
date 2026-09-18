@@ -3,91 +3,14 @@
 #include "module.h"
 #include "boot.h"
 #include "hlx_common.h"
-#include "trampoline.h"
+#include <MinHook.h>
 #include <windows.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <string.h>
-
-static int ModRMExtraBytes(unsigned char modrm)
-{
-    unsigned char mod = (modrm >> 6) & 3;
-    unsigned char rm = modrm & 7;
-    if (mod == 3) return 0;
-    if (rm == 4) return -1;
-    if (mod == 0) return (rm == 5) ? -1 : 0;
-    if (mod == 1) return 1;
-    return 4;
-}
-
-// Whitelists 4 instruction patterns, refuses (0) on anything else - never CALL/JMP or RIP-relative forms, which would break once copied into the trampoline's own address.
-static int DecodeSafeInstruction(const unsigned char *p)
-{
-    int i = 0;
-    bool hasSseprefix = false;
-    bool hasRex = false;
-    unsigned char rex = 0;
-
-    if (p[i] == 0xF2 || p[i] == 0xF3 || p[i] == 0x66) {
-        hasSseprefix = true;
-        i++;
-    }
-    if ((p[i] & 0xF0) == 0x40) {
-        hasRex = true;
-        rex = p[i];
-        i++;
-    }
-
-    if (!hasSseprefix && p[i] >= 0x50 && p[i] <= 0x57) return i + 1;
-
-    /* MOV r32/r64, imm (0xB8+reg): register-in-opcode form, no ModRM/SIB/displacement at
-     * all, so relocating it is always safe. This is the single most common instruction a
-     * trivial getter's cut-point scan needs and previously had no case for at all - HL's
-     * JIT loads the absolute address of any global/static value as a baked-in immediate
-     * here before dereferencing it, right after the "push rbp; mov rbp,rsp; sub rsp,N"
-     * preamble, so any one-line getter touching a static field hit an unrecognized byte
-     * this early and failed the scan outright (confirmed against real JIT output for
-     * lib.Input.allBlocked's shape - see patching bug notes). */
-    if (!hasSseprefix && p[i] >= 0xB8 && p[i] <= 0xBF)
-        return i + 1 + (hasRex && (rex & 0x08) ? 8 : 4);
-
-    if (!hasSseprefix && hasRex && (rex & 0x08) && (p[i] == 0x89 || p[i] == 0x8B)) {
-        int extra = ModRMExtraBytes(p[i + 1]);
-        if (extra < 0) return 0;
-        return i + 2 + extra;
-    }
-
-    if (!hasSseprefix && hasRex && (rex & 0x08) && p[i] == 0x81) {
-        unsigned char modrm = p[i + 1];
-        unsigned char reg = (modrm >> 3) & 7;
-        if ((modrm & 0xC0) == 0xC0 && (reg == 0 || reg == 5)) return i + 2 + 4;
-        return 0;
-    }
-
-    if (!hasSseprefix && hasRex && (rex & 0x08) && p[i] == 0x83) {
-        unsigned char modrm = p[i + 1];
-        unsigned char reg = (modrm >> 3) & 7;
-        if ((modrm & 0xC0) == 0xC0 && (reg == 0 || reg == 5)) return i + 2 + 1;
-        return 0;
-    }
-
-    if (p[i] == 0x0F) {
-        unsigned char op2 = p[i + 1];
-        if (op2 == 0x10 || op2 == 0x11 || op2 == 0x28 || op2 == 0x29) {
-            int extra = ModRMExtraBytes(p[i + 2]);
-            if (extra < 0) return 0;
-            return i + 3 + extra;
-        }
-        return 0;
-    }
-
-    return 0;
-}
 
 static void **g_sortedFunctionStarts = NULL;
 static int g_sortedFunctionCount = 0;
-static bool g_boundaryBuildAttempted = false;
 
 static int CompareFunctionAddrs(const void *a, const void *b)
 {
@@ -96,37 +19,30 @@ static int CompareFunctionAddrs(const void *a, const void *b)
     return pa < pb ? -1 : (pa > pb ? 1 : 0);
 }
 
+// Retries on every call until it succeeds - the module may not be recovered yet on an
+// early call, and a transient allocation/scan failure must not permanently disable this
+// safety check for the rest of the process. g_sortedFunctionStarts itself is the latch:
+// it's only ever set on the success path below.
 static void EnsureFunctionBoundaries(void)
 {
-    if (g_boundaryBuildAttempted) return;
+    if (g_sortedFunctionStarts) return;
 
     void *codePtr = module_get_code();
     void **functionsPtrs = module_get_functions_ptrs();
     if (!codePtr || !functionsPtrs) {
-        /* Do NOT latch g_boundaryBuildAttempted here. module_recover() runs from
-         * hlx_mods_loaded_impl (boot.c), driven by a native call from the Haxe-side
-         * loader, and is expected to complete before mods start calling install_patch -
-         * but that ordering is enforced outside this file. If EnsureFunctionBoundaries
-         * were ever reached earlier than that (e.g. a mod patching something before the
-         * "mods loaded" signal fires), latching here would have permanently disabled
-         * ALL function-boundary checks - and therefore the fun+12 guard in
-         * PatchFunctionPrologue - for the rest of the process, silently, for every
-         * later patch regardless of target. Retry on every call instead, until module
-         * recovery has actually happened. */
-        hlx_log(HLX_LOG_DEBUG, "[hlx-boot] EnsureFunctionBoundaries: module not recovered yet - cut-point scans will fall back to the fixed maxScan heuristic alone until it is");
+        hlx_log(HLX_LOG_DEBUG, "[hlx-boot] EnsureFunctionBoundaries: module not recovered yet");
         return;
     }
-    g_boundaryBuildAttempted = true; /* one build attempt per process, now that the module is actually available */
 
     int n = ((hlx_code_mirror_t *)codePtr)->nfunctions;
     if (n <= 0) {
-        hlx_log(HLX_LOG_ERROR, "[hlx-boot] EnsureFunctionBoundaries: code->nfunctions=%d - nothing to bound with", n);
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] EnsureFunctionBoundaries: code->nfunctions=%d", n);
         return;
     }
 
     void **addrs = (void **)malloc(sizeof(void *) * n);
     if (!addrs) {
-        hlx_log(HLX_LOG_ERROR, "[hlx-boot] EnsureFunctionBoundaries: allocation failed - cut-point scans will fall back to the fixed maxScan heuristic alone this run");
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] EnsureFunctionBoundaries: allocation failed");
         return;
     }
 
@@ -140,7 +56,7 @@ static void EnsureFunctionBoundaries(void)
         ok = false;
     }
     if (!ok || count == 0) {
-        hlx_log(HLX_LOG_ERROR, "[hlx-boot] EnsureFunctionBoundaries: functions_ptrs scan faulted or found nothing - cut-point scans will fall back to the fixed maxScan heuristic alone this run");
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] EnsureFunctionBoundaries: functions_ptrs scan faulted or found nothing");
         free(addrs);
         return;
     }
@@ -148,10 +64,12 @@ static void EnsureFunctionBoundaries(void)
     qsort(addrs, count, sizeof(void *), CompareFunctionAddrs);
     g_sortedFunctionStarts = addrs;
     g_sortedFunctionCount = count;
-    hlx_log(HLX_LOG_DEBUG, "[hlx-boot] EnsureFunctionBoundaries: cached %d known function start addresses for cut-point boundary checks", count);
+    hlx_log(HLX_LOG_DEBUG, "[hlx-boot] EnsureFunctionBoundaries: cached %d function start addresses", count);
 }
 
-// Nearest known function start strictly above fun - a hard ceiling the scan must never cross. NULL if boundaries aren't built or fun is at/after every known address.
+// Nearest known JIT'd function start above fun, or NULL if unknown. MinHook has no
+// equivalent of this - it only knows the target address it was given, not where the next
+// real function begins, and HL packs functions back-to-back with no padding between them.
 static const unsigned char *FindNextFunctionBoundary(const unsigned char *fun)
 {
     EnsureFunctionBoundaries();
@@ -168,22 +86,6 @@ static const unsigned char *FindNextFunctionBoundary(const unsigned char *fun)
     return (lo < g_sortedFunctionCount) ? (const unsigned char *)g_sortedFunctionStarts[lo] : NULL;
 }
 
-static int FindSafeCutPoint(const unsigned char *fun, int minLen, int maxScan, const unsigned char *hardLimit)
-{
-    int pos = 0;
-    while (pos < minLen) {
-        if (pos >= maxScan) return 0;
-        int len = DecodeSafeInstruction(fun + pos);
-        if (len <= 0) return 0;
-        pos += len;
-        if (hardLimit && fun + pos > hardLimit) {
-            hlx_log(HLX_LOG_ERROR, "[hlx-boot] FindSafeCutPoint: cutting at %d bytes would cross the next known function's start (%p) - refusing rather than spilling into it", pos, (void *)hardLimit);
-            return 0;
-        }
-    }
-    return pos;
-}
-
 typedef void (*TrampolineFn)(void);
 
 static void DumpPrologueBytes(const void *fun, int len)
@@ -192,7 +94,6 @@ static void DumpPrologueBytes(const void *fun, int len)
     const unsigned char *p = (const unsigned char *)fun;
     char line[256];
     int pos = 0;
-    bool readOk = true;
 
     __try {
         for (int i = 0; i < len && pos < (int)sizeof(line) - 4; i++) {
@@ -203,110 +104,63 @@ static void DumpPrologueBytes(const void *fun, int len)
         }
         line[pos] = 0;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-        readOk = false;
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] DumpPrologueBytes: dereference FAULTED reading %p", fun);
+        return;
     }
 
-    if (readOk) {
-        hlx_log(HLX_LOG_DEBUG, "[hlx-boot] DumpPrologueBytes: %p, first %d bytes: %s", fun, len, line);
-    } else {
-        hlx_log(HLX_LOG_ERROR, "[hlx-boot] DumpPrologueBytes: dereference FAULTED reading %p - not a valid code address, module recovery likely found the wrong candidate", fun);
-    }
+    hlx_log(HLX_LOG_DEBUG, "[hlx-boot] DumpPrologueBytes: %p, first %d bytes: %s", fun, len, line);
 }
 
-static bool BuildTrampoline(const unsigned char *fun, int cutLen, TrampolineFn *outTrampoline)
-{
-    /* 14, not 12: this resume-jump MUST be WriteRegisterSafeJumpStub, not
-     * WriteAbsoluteJumpStub - the cutLen bytes just copied ahead of it were only
-     * vetted by DecodeSafeInstruction for "safe to relocate" (no self-relative
-     * operands), not for "leaves no register live that the resumed original code
-     * depends on". A whitelisted `mov r64,imm` (e.g. loading a global's address)
-     * can leave exactly that register live for the very next original instruction
-     * to read - WriteAbsoluteJumpStub's "mov rax,target; jmp rax" would clobber it
-     * first, corrupting the resumed function instead of raising anything at
-     * install time (the corruption only surfaces as an access violation the first
-     * time the patched function actually runs). See WriteRegisterSafeJumpStub's
-     * own comment in trampoline.h. */
-    int totalLen = cutLen + 14;
-    void *buf = JitAlloc(totalLen);
-    if (!buf) return false;
-    bool copyOk = true;
-    __try {
-        memcpy(buf, fun, cutLen);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        copyOk = false;
-    }
-    if (!copyOk) {
-        VirtualFree(buf, 0, MEM_RELEASE);
-        return false;
-    }
-    WriteRegisterSafeJumpStub((unsigned char *)buf + cutLen, fun + cutLen);
-    *outTrampoline = (TrampolineFn)buf;
-    return true;
-}
+static bool g_minHookInitialized = false;
 
+// MinHook decodes and relocates the target's real instructions (CALL/JMP/Jcc, RIP-relative
+// operands included) - see documentation/minhook.md. FindNextFunctionBoundary is still
+// needed alongside it: MinHook only knows the address it was given, not where the next real
+// function starts. A target under 5 bytes (its shortest possible redirect) forces it to pull
+// in the next function's own first instruction to make up the difference - anything 5 bytes
+// or longer is safe, since a function's own instructions always sum to its own real length.
 static bool PatchFunctionPrologue(void *targetFun, void *hookFn, TrampolineFn *outTrampoline, const char *label)
 {
     unsigned char *fun = (unsigned char *)targetFun;
-
     DumpPrologueBytes(fun, 32);
 
     const unsigned char *hardLimit = FindNextFunctionBoundary(fun);
-    if (!hardLimit) {
-        hlx_log(HLX_LOG_DEBUG, "[hlx-boot] PatchFunctionPrologue(%s): no known next-function boundary available - cut-point scan is only bounded by the fixed maxScan heuristic this run", label);
+    if (hardLimit && hardLimit - fun < 5) {
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] PatchFunctionPrologue(%s): only %d byte(s) before the next known function - refusing", label, (int)(hardLimit - fun));
+        return false;
     }
 
-    int cutLen = 0;
-    bool decodeOk = true;
+    if (!g_minHookInitialized) {
+        MH_STATUS status = MH_Initialize();
+        if (status != MH_OK) {
+            hlx_log(HLX_LOG_ERROR, "[hlx-boot] PatchFunctionPrologue(%s): MH_Initialize failed: %s", label, MH_StatusToString(status));
+            return false;
+        }
+        g_minHookInitialized = true;
+    }
+
+    void *original = NULL;
+    MH_STATUS status = MH_OK;
     __try {
-        cutLen = FindSafeCutPoint(fun, 12, 64, hardLimit);
+        status = MH_CreateHook(targetFun, hookFn, &original);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-        decodeOk = false;
-    }
-    if (!decodeOk) {
-        hlx_log(HLX_LOG_ERROR, "[hlx-boot] PatchFunctionPrologue(%s): FindSafeCutPoint FAULTED reading %p - refusing to patch", label, targetFun);
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] PatchFunctionPrologue(%s): MH_CreateHook FAULTED - refusing", label);
         return false;
     }
-    if (cutLen <= 0) {
-        hlx_log(HLX_LOG_ERROR, "[hlx-boot] PatchFunctionPrologue(%s): no safe cut point found - refusing to patch", label);
+    if (status != MH_OK) {
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] PatchFunctionPrologue(%s): MH_CreateHook failed: %s", label, MH_StatusToString(status));
         return false;
     }
 
-    /* FindSafeCutPoint's hardLimit check protects the RELOCATED TRAMPOLINE COPY (cutLen
-     * bytes read starting at fun) from crossing into the next known function. Because
-     * FindSafeCutPoint is always called with minLen=12 here, and its loop only returns
-     * once pos >= minLen, a successful cutLen is always >= 12 - which, combined with the
-     * per-step "fun + pos > hardLimit" check it already performs, happens to also imply
-     * fun + 12 <= hardLimit. But that guarantee is an accidental byproduct of minLen==12
-     * matching the jump-stub size below, not an explicit invariant - nothing enforces
-     * that coupling if either constant ever changes, and it evaporates completely when
-     * hardLimit is NULL (module boundaries not yet available - see
-     * EnsureFunctionBoundaries), in which case FindSafeCutPoint has no boundary check at
-     * all and cutLen success proves nothing about fun+12. The unconditional 12-byte
-     * jump-stub WRITE at the target's OWN address (WriteAbsoluteJumpStub below) has never
-     * had a check of its own distinct from cutLen's - make the requirement explicit here,
-     * and refuse rather than spill into whatever real function is packed immediately
-     * after a too-short target, exactly like FindSafeCutPoint already does for the
-     * trampoline copy. */
-    if (hardLimit && fun + 12 > hardLimit) {
-        hlx_log(HLX_LOG_ERROR, "[hlx-boot] PatchFunctionPrologue(%s): the 12-byte jump-stub write at %p would cross the next known function's start (%p) - refusing rather than spilling into it", label, (void *)fun, (void *)hardLimit);
+    status = MH_EnableHook(targetFun);
+    if (status != MH_OK) {
+        MH_RemoveHook(targetFun);
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] PatchFunctionPrologue(%s): MH_EnableHook failed: %s", label, MH_StatusToString(status));
         return false;
     }
 
-    if (!BuildTrampoline(fun, cutLen, outTrampoline)) {
-        hlx_log(HLX_LOG_ERROR, "[hlx-boot] PatchFunctionPrologue(%s): trampoline build failed - refusing to patch", label);
-        return false;
-    }
-
-    DWORD oldProtect;
-    if (!VirtualProtect(fun, 12, PAGE_EXECUTE_READWRITE, &oldProtect)) {
-        hlx_log(HLX_LOG_ERROR, "[hlx-boot] PatchFunctionPrologue(%s): VirtualProtect failed, err=%lu", label, GetLastError());
-        return false;
-    }
-    WriteAbsoluteJumpStub(fun, hookFn);
-    DWORD dummy;
-    VirtualProtect(fun, 12, oldProtect, &dummy);
-
-    hlx_log(HLX_LOG_DEBUG, "[hlx-boot] PatchFunctionPrologue(%s): OK - cut point %d bytes, patched first 12 bytes at %p to redirect to hook=%p, trampoline at %p resumes original body at %p", label, cutLen, targetFun, hookFn, (void *)*outTrampoline, fun + cutLen);
+    *outTrampoline = (TrampolineFn)original;
+    hlx_log(HLX_LOG_DEBUG, "[hlx-boot] PatchFunctionPrologue(%s): OK - %p redirected to %p, trampoline %p", label, targetFun, hookFn, (void *)*outTrampoline);
     return true;
 }
 
@@ -314,6 +168,7 @@ static bool PatchFunctionPrologue(void *targetFun, void *hookFn, TrampolineFn *o
 
 typedef struct {
     void *realAddress;
+    void *receiverCode;
     TrampolineFn trampoline;
     const void *realType;
 } PatchEntry;
@@ -328,10 +183,25 @@ int install_patch(void *realAddress, const void *realType, void *receiverFn, con
         return -1;
     }
 
+    hlx_vclosure_mirror_t *receiverClosure = (hlx_vclosure_mirror_t *)receiverFn;
+    void *receiverCode = receiverClosure->fun;
+    if (!receiverCode) {
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] install_patch: receiverFn closure has a null .fun - ignoring");
+        return -1;
+    }
+
+    // Two different PatchTargetKeys (e.g. an inherited, non-overridden method) can resolve
+    // to the same underlying realAddress. Sharing the existing handle is only correct when
+    // it's truly the same hook being re-registered - a different receiver here means a
+    // second, unrelated hook would otherwise be silently dropped with no error anywhere.
     for (int i = 0; i < g_patchCount; i++) {
         if (g_patches[i].realAddress == realAddress) {
-            hlx_log(HLX_LOG_INFO, "[hlx-boot] install_patch: %p already patched - returning existing handle %d", realAddress, i);
-            return i;
+            if (g_patches[i].receiverCode == receiverCode) {
+                hlx_log(HLX_LOG_INFO, "[hlx-boot] install_patch: %p already patched - returning existing handle %d", realAddress, i);
+                return i;
+            }
+            hlx_log(HLX_LOG_ERROR, "[hlx-boot] install_patch: %p already patched by a different receiver (handle %d) - refusing", realAddress, i);
+            return -1;
         }
     }
 
@@ -348,13 +218,6 @@ int install_patch(void *realAddress, const void *realType, void *receiverFn, con
     if (narrowLabel[0]) wsprintfA(fullLabel, "patch#%d %s", g_patchCount, narrowLabel);
     else wsprintfA(fullLabel, "patch#%d", g_patchCount);
 
-    hlx_vclosure_mirror_t *receiverClosure = (hlx_vclosure_mirror_t *)receiverFn;
-    void *receiverCode = receiverClosure->fun;
-    if (!receiverCode) {
-        hlx_log(HLX_LOG_ERROR, "[hlx-boot] install_patch: receiverFn closure has a null .fun - ignoring");
-        return -1;
-    }
-
     TrampolineFn trampoline = NULL;
     if (!PatchFunctionPrologue(realAddress, receiverCode, &trampoline, fullLabel)) {
         return -1;
@@ -362,6 +225,7 @@ int install_patch(void *realAddress, const void *realType, void *receiverFn, con
 
     int handle = g_patchCount++;
     g_patches[handle].realAddress = realAddress;
+    g_patches[handle].receiverCode = receiverCode;
     g_patches[handle].trampoline = trampoline;
     g_patches[handle].realType = realType;
     return handle;

@@ -13,6 +13,34 @@ and bump the version in `hlx-runtime/haxelib.json` to match the tag — the rele
 
 ## [Unreleased]
 
+## [0.0.9] - 2026-09-18
+
+Fix native hook installation failing on functions the previous byte-level whitelist couldn't safely relocate
+
+- `patching.c`'s hand-rolled instruction whitelist is replaced with MinHook 1.3.4 (vendored in
+  `hlx-boot/vendor/minhook/`), which decodes and relocates real `CALL`/`JMP`/`Jcc` and
+  RIP-relative operands instead of refusing to patch past them - fixes `install_patch failed`
+  for short, straight-line functions whose JIT'd prologue no longer padded past those opcodes
+  once the game's JIT got leaner (see `documentation/minhook.md` for the full root-cause trace)
+- The existing known-function-boundary safety check stays - MinHook has no equivalent of it,
+  only local heuristics - and MinHook's own hotpatch-above fallback is disabled outright, since
+  JIT'd functions are packed back-to-back with no padding before them for it to use
+- `MH_CreateHook` is now wrapped in SEH - MinHook has no internal exception handling of its own,
+  and a target too close to the end of the JIT code region could otherwise crash the whole
+  process instead of failing just that one patch
+- Thanks to [xWink](https://github.com/xWink), who pointed to MinHook as the fix for HL 2.0's
+  leaner JIT prologues breaking the old whitelist scanner.
+
+Fix two `install_patch` correctness bugs found while rewriting the patcher
+
+- A transient allocation or scan failure while building the function-boundary cache no longer
+  permanently disables that safety check for the rest of the process - it now retries on the
+  next `install_patch` call instead of latching the failure forever
+- Two different patch targets that resolve to the same underlying function address (e.g. an
+  inherited, non-overridden method) no longer silently share one hook - installing a second,
+  different receiver against an address already patched by another now fails loudly instead of
+  silently dropping the second mod's hook with no error anywhere
+
 ## [0.0.8] - 2026-09-13
 
 Show a clear in-game error and exit cleanly when the game's bytecode version isn't supported

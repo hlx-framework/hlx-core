@@ -12,6 +12,7 @@ set(CMAKE_C_STANDARD 11)
 
 include_directories(include)
 include_directories(vendor/hashlink)
+include_directories(vendor/minhook/include)
 
 add_library(hlx-boot SHARED
     src/boot.c
@@ -26,6 +27,10 @@ add_library(hlx-boot SHARED
     src/registry.c
     src/trampoline.c
     vendor/hashlink/code.c
+    vendor/minhook/src/buffer.c
+    vendor/minhook/src/hde/hde64.c
+    vendor/minhook/src/hook.c
+    vendor/minhook/src/trampoline.c
 )
 
 set_target_properties(hlx-boot PROPERTIES
