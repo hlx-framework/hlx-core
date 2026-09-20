@@ -4,6 +4,8 @@
 #include "log.h"
 #include "config.h"
 #include "hlx_common.h"
+#include "driver.h"
+#include "modinfo.h"
 #include <windows.h>
 #include <stdbool.h>
 #include <string.h>
@@ -83,6 +85,14 @@ static void LoadHdllsInDir(const char *dir, int *loadedCount, int *failedCount)
  * the same handle. */
 static void EagerLoadPluginHdlls(void)
 {
+    int gameMajor, gameMinor, gamePatch, gameBuild;
+    bool haveGameVersion = driver_try_get_game_version(&gameMajor, &gameMinor, &gamePatch, &gameBuild);
+    if (haveGameVersion) {
+        hlx_log(HLX_LOG_INFO, "[hlx-boot] game version: %d.%d.%d.%d", gameMajor, gameMinor, gamePatch, gameBuild);
+    } else {
+        hlx_log(HLX_LOG_INFO, "[hlx-boot] game version: unknown (no hlx/drivers/game_version/game_version.dll found) - mod.info version gating disabled");
+    }
+
     char pluginsDir[MAX_PATH];
     GetPluginsDir(pluginsDir, MAX_PATH);
 
@@ -106,6 +116,16 @@ static void EagerLoadPluginHdlls(void)
         strcpy_s(modPluginsDir, MAX_PATH, pluginsDir);
         strcat_s(modPluginsDir, MAX_PATH, "\\");
         strcat_s(modPluginsDir, MAX_PATH, findData.cFileName);
+
+        if (haveGameVersion) {
+            char modInfoPath[MAX_PATH];
+            strcpy_s(modInfoPath, MAX_PATH, modPluginsDir);
+            strcat_s(modInfoPath, MAX_PATH, "\\mod.info");
+            if (!modinfo_allows_version(modInfoPath, gameMajor, gameMinor, gamePatch, gameBuild)) {
+                hlx_log(HLX_LOG_INFO, "[hlx-boot] LoadPlugin: skipping %s - incompatible with game version %d.%d.%d.%d per mod.info", findData.cFileName, gameMajor, gameMinor, gamePatch, gameBuild);
+                continue;
+            }
+        }
 
         LoadHdllsInDir(modPluginsDir, &loaded, &failed);
     } while (FindNextFileA(find, &findData));
@@ -375,9 +395,9 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
         OpenGameLog();
         hlx_log(HLX_LOG_INFO, "[hlx-boot] ==== hlx-boot libhl64.dll loaded via resolve_library(\"std\"), pid=%lu ====", GetCurrentProcessId());
         hlx_log(HLX_LOG_INFO, "[hlx-boot] loader.conf: game_trace=%s log_level=%s", ConfigGameTraceEnabled() ? "true" : "false", LogLevelName(ConfigGetLogLevel()));
+        ResolveSetup();
         WidenPluginSearchPath();
         EagerLoadPluginHdlls();
-        ResolveSetup();
         InstallIATHook();
     } else if (reason == DLL_PROCESS_DETACH) {
         CloseHlxLog();

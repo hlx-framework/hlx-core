@@ -68,4 +68,24 @@ class Native {
     public static inline function loadMod(file:String):Bool {
         return sysLoadPlugin(Sys.getPath(file));
     }
+
+    @:hlNative("std", "hlx_try_get_game_version")
+    static function hlxTryGetGameVersion(outBuf:hl.Bytes):Bool {
+        return false;
+    }
+
+    public static function tryGetGameVersion():Null<{major:Int, minor:Int, patch:Int, build:Int}> {
+        var buf = new hl.Bytes(16);
+        if (!hlxTryGetGameVersion(buf)) return null;
+        return { major: buf.getI32(0), minor: buf.getI32(4), patch: buf.getI32(8), build: buf.getI32(12) };
+    }
+
+    @:hlNative("std", "hlx_mod_info_allows_version")
+    static function hlxModInfoAllowsVersion(modInfoPath:hl.Bytes, major:Int, minor:Int, patch:Int, build:Int):Bool {
+        return true;
+    }
+
+    public static inline function modInfoAllowsVersion(modInfoPath:String, major:Int, minor:Int, patch:Int, build:Int):Bool {
+        return hlxModInfoAllowsVersion(modInfoPath.bytes, major, minor, patch, build);
+    }
 }

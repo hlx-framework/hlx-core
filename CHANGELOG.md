@@ -13,6 +13,10 @@ and bump the version in `hlx-runtime/haxelib.json` to match the tag — the rele
 
 ## [Unreleased]
 
+## [0.0.10] - 2026-09-20
+
+Gate mod loading by game version, via an optional per-game driver DLL and a mod's own `mod.info`
+
 ## [0.0.9] - 2026-09-18
 
 Fix native hook installation failing on functions the previous byte-level whitelist couldn't safely relocate

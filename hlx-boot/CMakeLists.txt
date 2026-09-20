@@ -18,13 +18,16 @@ add_library(hlx-boot SHARED
     src/boot.c
     src/bus.c
     src/config.c
+    src/driver.c
     src/hlcode_shim.c
     src/hlx_common.c
     src/log.c
+    src/modinfo.c
     src/module.c
     src/patching.c
     src/reflection.c
     src/registry.c
+    src/staticfields.c
     src/trampoline.c
     vendor/hashlink/code.c
     vendor/minhook/src/buffer.c

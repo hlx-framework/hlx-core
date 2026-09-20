@@ -17,10 +17,16 @@ class Boot {
         // Sort explicitly - directory read order isn't guaranteed, and load order = dispatch order.
         names.sort((a, b) -> a < b ? -1 : (a > b ? 1 : 0));
 
+        var gameVersion = Native.tryGetGameVersion();
+
         for (name in names) {
             var path = modsDir + "/" + name + "/" + name + ".hl";
             if (!sys.FileSystem.exists(path)) {
                 trace('skipping $name: no $path');
+                continue;
+            }
+            if (gameVersion != null && !Native.modInfoAllowsVersion(modsDir + "/" + name + "/mod.info", gameVersion.major, gameVersion.minor, gameVersion.patch, gameVersion.build)) {
+                trace('skipping $name: incompatible with game version ${gameVersion.major}.${gameVersion.minor}.${gameVersion.patch}.${gameVersion.build} per mod.info');
                 continue;
             }
             var ok = try Native.loadMod(path) catch (e:Dynamic) {

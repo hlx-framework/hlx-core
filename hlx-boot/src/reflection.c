@@ -3,6 +3,7 @@
 #include "boot.h"
 #include "hlx_common.h"
 #include "log.h"
+#include "staticfields.h"
 #include <windows.h>
 #include <stdbool.h>
 #include <string.h>
@@ -1582,11 +1583,14 @@ void reflection_init_constructor_table(void)
             bootPath, (unsigned long)(GetTickCount() - startTick), functionsScanned, code->nfunctions, functionsFaulted,
             g_totalCandidateSites, distinctTypesWithCandidates, unambiguousByRawFindex, stillAmbiguousByRawFindex);
 
+    staticfields_index_entrypoint(code);
+
     /* hl_code_free only frees code->falloc (the ops/regs arena, hashlink/src/code.c) - we've
-     * already extracted everything we need (narrowed names + findexes) into
-     * g_ctorNameBuckets, which owns its own copies. code->alloc (types/strings, including
-     * every type's raw .name) is never freed by hl_code_free at all and is simply leaked for
-     * the process's lifetime, matching this being a one-time, load-once structure. */
+     * already extracted everything we need (narrowed names + findexes into g_ctorNameBuckets;
+     * staticfields.c did the same for its own table off this same code before this line), each of which owns
+     * its own copies. code->alloc (types/strings, including every type's raw .name) is never
+     * freed by hl_code_free at all and is simply leaked for the process's lifetime, matching
+     * this being a one-time, load-once structure. */
     hl_code_free(code);
 }
 
