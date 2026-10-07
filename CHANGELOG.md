@@ -13,6 +13,13 @@ and bump the version in `hlx-runtime/haxelib.json` to match the tag — the rele
 
 ## [Unreleased]
 
+## [0.0.11] - 2026-10-08
+
+Run module recovery before loading mods so reflection is available in `main()`, and fix `installPatch` signature
+
+- `module_recover` (`hlx-boot`) is now executed early in `HookedHlDynCallSafe` before `hlx-loader.hl` loads, making type/member reflection available when mods run their `main()` instead of failing until after all mods have finished loading
+- `HlxRuntime.installPatch` (`hlx-runtime`) extern updated to include the missing `label` argument matching `hlx-boot`'s `PBBDB_i` signature, fixing mod load crashes on modules compiled without `-dce full`
+
 ## [0.0.10] - 2026-09-20
 
 Gate mod loading by game version, via an optional per-game driver DLL and a mod's own `mod.info`

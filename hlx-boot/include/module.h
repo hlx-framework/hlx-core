@@ -63,6 +63,7 @@ typedef struct {
 } hlx_code_mirror_t;
 
 bool module_recover(const void *targetFun);
+bool module_is_recovered(void);
 void *module_get_code(void);
 void **module_get_functions_ptrs(void);
 /* Globals table + per-slot byte offsets (hl_module.globals_data/globals_indexes); index bound is nglobals. */

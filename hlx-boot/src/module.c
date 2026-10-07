@@ -158,6 +158,11 @@ void *module_get_code(void)
     return g_recoveredCode;
 }
 
+bool module_is_recovered(void)
+{
+    return g_recoveredCode != NULL;
+}
+
 void **module_get_functions_ptrs(void)
 {
     return g_functionsPtrsGlobal;

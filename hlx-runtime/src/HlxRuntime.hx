@@ -64,7 +64,7 @@ class HlxRuntime {
     }
 
     @:hlNative("std", "hlx_install_patch")
-    static function hlxInstallPatch(realAddress:hl.Bytes, realType:hl.Bytes, receiverFn:Dynamic):Int {
+    static function hlxInstallPatch(realAddress:hl.Bytes, realType:hl.Bytes, receiverFn:Dynamic, label:hl.Bytes):Int {
         return -1;
     }
 
@@ -223,8 +223,8 @@ class HlxRuntime {
         if (companion != null) Reflect.setField(companion, fieldName, value);
     }
 
-    public static inline function installPatch(realAddress:hl.Bytes, realType:hl.Bytes, receiverFn:Dynamic):Int {
-        return hlxInstallPatch(realAddress, realType, receiverFn);
+    public static inline function installPatch(realAddress:hl.Bytes, realType:hl.Bytes, receiverFn:Dynamic, ?label:String):Int {
+        return hlxInstallPatch(realAddress, realType, receiverFn, label == null ? new hl.Bytes(0) : label.bytes);
     }
 
     public static inline function callOriginal(handle:Int, args:Array<Dynamic>):Dynamic {

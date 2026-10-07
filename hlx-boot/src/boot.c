@@ -279,14 +279,8 @@ static void *g_bootTargetFun;
 
 static bool hlx_mods_loaded_impl(void)
 {
-    hlx_log(HLX_LOG_DEBUG, "[hlx-boot] hlx_mods_loaded: running module recovery now");
-    bool recovered = module_recover(g_bootTargetFun);
-    /* construct_instance_by_name's constructor table no longer depends on module_recover at
-     * all - it's built from hlboot.dat directly (see ResolveSetup/reflection_init_constructor_table)
-     * well before this function ever runs. module_recover here still matters for everything
-     * ELSE that resolves names/members against the LIVE module (resolve_type_by_name,
-     * ResolveFunctionByFindex, ...), unchanged. */
-    return recovered;
+    hlx_log(HLX_LOG_DEBUG, "[hlx-boot] hlx_mods_loaded: module recovery already done at hook time");
+    return module_is_recovered();
 }
 
 // "P_b": niladic Bool return - leading 'P' is HFUN's own kind marker, not an argument char.
@@ -300,6 +294,11 @@ static void *WINAPI HookedHlDynCallSafe(void *closure, void **args, int nargs, v
         hlx_vclosure_mirror_t *orig = (hlx_vclosure_mirror_t *)closure;
         g_bootTargetFun = orig->fun;
         hlx_log(HLX_LOG_DEBUG, "[hlx-boot] HookedHlDynCallSafe FIRED (boot call), target=%p", g_bootTargetFun);
+
+        // Run module recovery HERE, before loading hlx-loader.hl,
+        // so reflection works when mods run their main()
+        module_recover(g_bootTargetFun);
+
         bool hasLoadPlugin = g_setup && (reflection_get_bytecode_version() >= 6
             ? ((hlx_setup_mirror_v6_t *)g_setup)->load_plugin != NULL
             : g_setup->load_plugin != NULL);
