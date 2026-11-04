@@ -164,7 +164,7 @@ static bool PatchFunctionPrologue(void *targetFun, void *hookFn, TrampolineFn *o
     return true;
 }
 
-#define MAX_PATCHES 256
+#define INITIAL_PATCH_CAPACITY 512
 
 typedef struct {
     void *realAddress;
@@ -173,8 +173,26 @@ typedef struct {
     const void *realType;
 } PatchEntry;
 
-static PatchEntry g_patches[MAX_PATCHES];
+static PatchEntry *g_patches = NULL;
 static int g_patchCount = 0;
+static int g_patchCapacity = 0;
+
+static PatchEntry *acquirePatchSlot(void)
+{
+    if (g_patchCount < g_patchCapacity)
+        return &g_patches[g_patchCount];
+
+    int newCapacity = g_patchCapacity == 0 ? INITIAL_PATCH_CAPACITY : g_patchCapacity * 2;
+    PatchEntry *p = (PatchEntry *)realloc(g_patches, sizeof(PatchEntry) * newCapacity);
+    if (!p) {
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] install_patch: realloc to %d entries failed", newCapacity);
+        return NULL;
+    }
+    g_patches = p;
+    g_patchCapacity = newCapacity;
+    hlx_log(HLX_LOG_DEBUG, "[hlx-boot] install_patch: grew patch table to %d entries", newCapacity);
+    return &g_patches[g_patchCount];
+}
 
 int install_patch(void *realAddress, const void *realType, void *receiverFn, const unsigned short *label)
 {
@@ -205,8 +223,8 @@ int install_patch(void *realAddress, const void *realType, void *receiverFn, con
         }
     }
 
-    if (g_patchCount >= MAX_PATCHES) {
-        hlx_log(HLX_LOG_ERROR, "[hlx-boot] install_patch: MAX_PATCHES (%d) reached - ignoring", MAX_PATCHES);
+    PatchEntry *entry = acquirePatchSlot();
+    if (!entry) {
         return -1;
     }
 
@@ -224,10 +242,10 @@ int install_patch(void *realAddress, const void *realType, void *receiverFn, con
     }
 
     int handle = g_patchCount++;
-    g_patches[handle].realAddress = realAddress;
-    g_patches[handle].receiverCode = receiverCode;
-    g_patches[handle].trampoline = trampoline;
-    g_patches[handle].realType = realType;
+    entry->realAddress = realAddress;
+    entry->receiverCode = receiverCode;
+    entry->trampoline = trampoline;
+    entry->realType = realType;
     return handle;
 }
 

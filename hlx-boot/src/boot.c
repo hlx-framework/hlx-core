@@ -389,6 +389,14 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
     (void)reserved;
     if (reason == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(hinst);
+
+        /* The game EXE may be a console subsystem app, in which case Windows
+         * creates a console window at process start - before any DLL runs.
+         * hlx doesn't need it (all traces go to hlx/logs/*.log), and a
+         * lingering console window can hijack external overlays that attach
+         * to it instead of the game window. Detach as early as possible. */
+        FreeConsole();
+
         OpenHlxLog();
         LoadLoaderConfig();
         OpenGameLog();

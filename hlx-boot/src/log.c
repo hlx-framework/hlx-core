@@ -122,10 +122,13 @@ static void HookedSysPrintCommon(void *msg, const char *moduleName)
                 WriteLine(g_hlxLogFile, tagged);
             } else if (ConfigGameTraceEnabled()) {
                 WriteLine(g_gameLogFile, narrow);
+            } else {
+                // Not captured to any log file - forward to the real sys_print so it
+                // still reaches the console (preserves original behavior for uncaptured output).
+                if (g_realSysPrint) g_realSysPrint(msg);
             }
         }
     }
-    if (g_realSysPrint) g_realSysPrint(msg);
 }
 
 static void WINAPI HookedSysPrintFallback(void *msg)

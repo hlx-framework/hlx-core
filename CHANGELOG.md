@@ -11,7 +11,13 @@ Add entries under `[Unreleased]` as changes land.
 Before tagging a release, move the `[Unreleased]` entries under a new `[X.Y.Z] - YYYY-MM-DD` heading,
 and bump the version in `hlx-runtime/haxelib.json` to match the tag — the release workflow checks this and fails otherwise.
 
-## [Unreleased]
+## [0.0.12] - 2026-11-04
+
+Remove the hard 256-patch cap in `hlx-boot`'s `install_patch`, stop echoing traces to the console, and detach the inherited console window so external overlays attach to the game window.
+
+- `install_patch` (`hlx-boot`) now grows its patch table dynamically (MinHook-style `realloc`×2, starting at 512) instead of refusing patches past a fixed `MAX_PATCHES` of 256
+- `trace()`/`Sys.println` output is written to `hlx/logs/*.log` only and no longer forwarded to the real `sys_print` console, so it does not interfere with external overlays
+- `DllMain` now calls `FreeConsole()` on attach to close the console window the game EXE may have created, preventing overlays from attaching to it instead of the game window
 
 ## [0.0.11] - 2026-10-08
 
