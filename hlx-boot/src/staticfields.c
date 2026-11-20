@@ -1,6 +1,8 @@
 #include "staticfields.h"
 #include "module.h"
+#include "hl_compat.h"
 #include "hlx_common.h"
+#include "hlmodule.h"
 #include <windows.h>
 #include <stdlib.h>
 #include <string.h>
@@ -65,30 +67,35 @@ static hl_obj_field *ResolveOwnField(hl_type_obj *leaf, int fi)
     return &leaf->fields[fi - superFieldOffset];
 }
 
-void staticfields_index_entrypoint(hl_code *code)
+void staticfields_index_entrypoint(const void *code)
 {
-    for (int i = 0; i < code->nfunctions; i++) {
-        hl_function *fn = &code->functions[i];
-        if (fn->findex != code->entrypoint) continue;
+    int nfunctions = hl_compat_nfunctions(code);
+    int entrypoint = hl_compat_entrypoint(code);
+    for (int i = 0; i < nfunctions; i++) {
+        const hl_function *fn = (const hl_function *)hl_compat_function_at(code, i);
+        if (!fn) continue;
+        if (fn->findex != entrypoint) continue;
         if (!fn->ops || !fn->regs || fn->nops <= 0) return;
 
+        int nglobals = hl_compat_nglobals(code);
+        int nints = hl_compat_nints(code);
         __try {
             for (int k = 2; k < fn->nops; k++) {
-                hl_opcode *setField = &fn->ops[k];
+                const hl_opcode *setField = &fn->ops[k];
                 if (setField->op != OSetField) continue;
                 int objReg = setField->p1, fi = setField->p2, srcReg = setField->p3;
 
-                hl_opcode *getGlobal = &fn->ops[k - 1];
+                const hl_opcode *getGlobal = &fn->ops[k - 1];
                 if (getGlobal->op != OGetGlobal || getGlobal->p1 != objReg) continue;
                 int globalIndex = getGlobal->p2;
-                if (globalIndex < 0 || globalIndex >= code->nglobals) continue;
+                if (globalIndex < 0 || globalIndex >= nglobals) continue;
 
-                hl_opcode *intLoad = &fn->ops[k - 2];
+                const hl_opcode *intLoad = &fn->ops[k - 2];
                 if (intLoad->op != OInt || intLoad->p1 != srcReg) continue;
                 int intIndex = intLoad->p2;
-                if (intIndex < 0 || intIndex >= code->nints) continue;
+                if (intIndex < 0 || intIndex >= nints) continue;
 
-                hl_type *globalType = code->globals[globalIndex];
+                hl_type *globalType = (hl_type *)hl_compat_get_global(code, globalIndex);
                 if (!globalType || (globalType->kind != HOBJ_KIND && globalType->kind != HSTRUCT_KIND) || !globalType->obj) continue;
 
                 hl_obj_field *field = ResolveOwnField(globalType->obj, fi);
@@ -97,7 +104,7 @@ void staticfields_index_entrypoint(hl_code *code)
                 char typeName[256], fieldName[256];
                 hlx_narrow_utf16((const unsigned short *)globalType->obj->name, typeName, sizeof(typeName));
                 hlx_narrow_utf16((const unsigned short *)field->name, fieldName, sizeof(fieldName));
-                AddEntry(typeName, fieldName, code->ints[intIndex]);
+                AddEntry(typeName, fieldName, hl_compat_get_int(code, intIndex));
             }
         } __except (EXCEPTION_EXECUTE_HANDLER) {
             hlx_log(HLX_LOG_ERROR, "[hlx-boot] staticfields_index_entrypoint: faulted mid-scan");

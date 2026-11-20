@@ -11,6 +11,15 @@ Add entries under `[Unreleased]` as changes land.
 Before tagging a release, move the `[Unreleased]` entries under a new `[X.Y.Z] - YYYY-MM-DD` heading,
 and bump the version in `hlx-runtime/haxelib.json` to match the tag — the release workflow checks this and fails otherwise.
 
+## [0.0.13] - 2026-11-20
+
+Add an ABI compatibility layer so a single `hlx-boot` build supports HashLink bytecode v6 (old & new) and v7, and add timestamps to mod `trace()`/`Sys.print` output.
+
+- `hl_compat` (`hlx-boot`): new internal subsystem that detects and cross-validates the game's live `hl_code` layout at runtime, with three supported variants — v6-old (pre-c04f8897, contiguous `hl_type[]`), v6-new (post-c04f8897, `hl_type**` pointer array, `vobj_table` rename), and v7 (fd8c227a/9f47d259 layout with `file_size`/`build_id`, `types_vslots`, `lnames`) — all accessed through normalized accessors so the rest of hlx-boot never sees raw variant-specific structs
+- `hlx-boot` vendored HashLink reader (`vendor/hashlink/`) remains the v6-old ABI for parsing `hlboot.dat`; live-module recovery via `module_recover()` now validates against the detected variant instead of assuming one fixed layout
+- `reflection.c`, `module.c`, `staticfields.c`, `patching.c`, `boot.c` refactored to route all `hl_code` field access through `hl_compat` accessors (`hl_compat_ntypes`, `hl_compat_get_type`, `hl_compat_function_type`, etc.) — static-asserted at compile time against every vendor header in `vendor/hashlink_compat/`
+- `trace()`/`Sys.println` calls from mods (via hooked `sys_print`) now include timestamps in `hlx/logs/hlx.log` — format `[YYYY-MM-DD HH:MM:SS.mmm] [modname] message` — matching the timestamps already present in hlx-core internal logs; game trace (`game_trace=true`) also gets timestamps in `hlx/logs/game_trace.log`
+
 ## [0.0.12] - 2026-11-04
 
 Remove the hard 256-patch cap in `hlx-boot`'s `install_patch`, stop echoing traces to the console, and detach the inherited console window so external overlays attach to the game window.

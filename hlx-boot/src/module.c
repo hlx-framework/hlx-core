@@ -1,17 +1,8 @@
 #include "module.h"
+#include "hl_compat.h"
+#include "reflection.h"
 #include "boot.h"
 #include <windows.h>
-
-typedef struct {
-    void *code;
-    int codesize;
-    int globals_size;
-    void *globals_indexes;
-    void *globals_data;
-    void *functions_ptrs;
-    void *functions_indexes;
-    void *jit_code;
-} hlx_module_mirror_t;
 
 static void *g_recoveredCode;
 static void **g_functionsPtrsGlobal;
@@ -89,32 +80,35 @@ static void *FindPrimaryModule(const void *targetFun, void ***outFunctionsPtrs, 
 
                 matchesFound++;
 
-                hlx_code_mirror_t volatile *code = (hlx_code_mirror_t volatile *)candCode;
                 void * volatile *volatileFps = (void * volatile *)fps;
-                int entrypoint = -1;
-                void *epPtr = NULL;
                 bool readOk = false;
 
-                if (code && fps) {
-                    __try {
-                        entrypoint = code->entrypoint;
-                        /* entrypoint just came from a candidate that only passed the loose
-                         * jit_code/codesize/bounds heuristics above - it's still unvalidated
-                         * garbage until proven otherwise. A wild value here (this candidate is
-                         * probably not a real hlx_module_mirror_t at all) turns fps[entrypoint]
-                         * into an arbitrarily-offset read; bound it the same way codesize already
-                         * is above, instead of relying on SEH to catch every possible resulting
-                         * address. */
-                        if (entrypoint >= 0 && entrypoint < 10000000) {
-                            epPtr = (void *)volatileFps[entrypoint];
-                            readOk = true;
+                if (candCode && fps) {
+                    /* entrypoint sits at a different offset in each supported hl_code layout, and
+                     * which layout this candidate has is exactly what hl_compat has not decided
+                     * yet - so probe every layout's value and let the fps[entrypoint]==targetFun
+                     * identity below pick the one that is real. Every value still has to pass the
+                     * same bounds gate as codesize above before it indexes volatileFps, since a
+                     * wild one (this candidate is probably not a real hlx_module_mirror_t at all)
+                     * would otherwise become an arbitrarily-offset read. */
+                    int entryCandidates[4];
+                    int nEntryCandidates = hl_compat_entrypoint_candidates(candCode, entryCandidates, 4);
+                    for (int ei = 0; ei < nEntryCandidates && !readOk; ei++) {
+                        if (entryCandidates[ei] < 0 || entryCandidates[ei] >= 10000000) continue;
+                        __try {
+                            void *p = (void *)volatileFps[entryCandidates[ei]];
+                            if (p == targetFun) readOk = true;
+                        } __except (EXCEPTION_EXECUTE_HANDLER) {
+                            readOk = false;
                         }
-                    } __except (EXCEPTION_EXECUTE_HANDLER) {
-                        readOk = false;
                     }
                 }
 
-                if (code && fps && readOk && epPtr == targetFun && !foundCode) {
+                if (candCode && fps && readOk && !foundCode) {
+                    if (!hl_compat_detect_live(candCode, reflection_get_bytecode_version())) {
+                        hlx_log(HLX_LOG_DEBUG, "[hlx-boot] FindPrimaryModule: candidate #%d at %p rejected by hl_compat - continuing scan", matchesFound, (void *)cand);
+                        continue;
+                    }
                     hlx_log(HLX_LOG_DEBUG, "[hlx-boot] FindPrimaryModule: candidate #%d at %p VALIDATED - functions_ptrs=%p", matchesFound, (void *)cand, fps);
                     foundCode = candCode;
                     if (outFunctionsPtrs) *outFunctionsPtrs = fps;

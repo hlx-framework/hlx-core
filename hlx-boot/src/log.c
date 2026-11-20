@@ -79,16 +79,30 @@ void CloseHlxLog(void)
     CloseLogFile(&g_hlxLogFile);
 }
 
+// moduleName is a parameter, not a call-time lookup, so each per-module trampoline attributes trace() correctly at any later call time.
+static void AppendTimestamp(char *out, size_t outSize)
+{
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    wsprintfA(out, "[%04d-%02d-%02d %02d:%02d:%02d.%03d] ", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+}
+
 void hlx_log(HlxLogLevel level, const char *fmt, ...)
 {
     if (level < ConfigGetLogLevel()) return;
+
+    char timestamp[48];
+    AppendTimestamp(timestamp, sizeof(timestamp));
 
     char msg[1024];
     va_list args;
     va_start(args, fmt);
     wvsprintfA(msg, fmt, args);
     va_end(args);
-    WriteLine(g_hlxLogFile, msg);
+
+    char full[1072];
+    wsprintfA(full, "%s%s", timestamp, msg);
+    WriteLine(g_hlxLogFile, full);
 }
 
 /* The game's own trace()/Sys.print calls land here (not hlx.log), gated by game_trace. */
@@ -107,7 +121,6 @@ void CloseGameLog(void)
 
 HlSysPrintFn g_realSysPrint;
 
-// moduleName is a parameter, not a call-time lookup, so each per-module trampoline attributes trace() correctly at any later call time.
 static void HookedSysPrintCommon(void *msg, const char *moduleName)
 {
     if (msg) {
@@ -115,13 +128,18 @@ static void HookedSysPrintCommon(void *msg, const char *moduleName)
         hlx_narrow_utf16((const unsigned short *)msg, narrow, sizeof(narrow));
         // Sys.println sends the message and a bare "\n" as two separate sys_print calls; skip the bare one since WriteLine already appends its own line ending.
         if (narrow[0] != '\n' || narrow[1] != 0) {
+            char timestamp[48];
+            AppendTimestamp(timestamp, sizeof(timestamp));
+
             if (moduleName) {
                 // wsprintfA hard-caps output at 1024 regardless of buffer size - do not shrink below that.
-                char tagged[1024 + 64];
-                wsprintfA(tagged, "[%s] %s", moduleName, narrow);
+                char tagged[1024 + 64 + 48];
+                wsprintfA(tagged, "%s[%s] %s", timestamp, moduleName, narrow);
                 WriteLine(g_hlxLogFile, tagged);
             } else if (ConfigGameTraceEnabled()) {
-                WriteLine(g_gameLogFile, narrow);
+                char tagged[1024 + 48];
+                wsprintfA(tagged, "%s%s", timestamp, narrow);
+                WriteLine(g_gameLogFile, tagged);
             } else {
                 // Not captured to any log file - forward to the real sys_print so it
                 // still reaches the console (preserves original behavior for uncaptured output).

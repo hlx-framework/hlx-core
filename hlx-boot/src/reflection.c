@@ -1,5 +1,6 @@
 #include "reflection.h"
 #include "module.h"
+#include "hl_compat.h"
 #include "boot.h"
 #include "hlx_common.h"
 #include "log.h"
@@ -9,16 +10,16 @@
 #include <string.h>
 #include <stdlib.h>
 
-/* Real hl_code/hl_function/hl_opcode/hl_type structures - used ONLY by the file-based
- * constructor scan below (reflection_init_constructor_table and everything under it), which
- * parses a FRESH, independently-owned copy of hlboot.dat via the vendored hl_code_read
- * (hlx-boot/vendor/hashlink/, see that directory's README.md). Every OTHER function in this
- * file reads the LIVE, already-running process's module instead, via the hand-derived
- * hlx_*_mirror_t structs below - those can't use these real headers because hlx-boot has no
- * compile-time link to the exact struct layout the ALREADY-RUNNING game's own libhl.dll build
- * used; here, by contrast, we compiled hl_code_read ourselves, so the real headers are exactly
- * what we want, and are used directly instead of adding yet another mirror. LIBHL_STATIC
- * (CMakeLists.txt) keeps hl.h's HL_API as plain `extern`, matching hlcode_shim.c. */
+/* hashlink/src/hl.h + hlmodule.h from vendor/hashlink/ - used ONLY for the file-based
+ * constructor scan below (reflection_init_constructor_table and everything under it): the
+ * hl_code_read/hl_code_free entry points, the opcode constants, and nothing else. Every
+ * structure FIELD this file reads goes through hl_compat.h's accessors or its hlx_*_mirror_t
+ * layouts, because hlx-boot has no compile-time link to the exact struct layout the
+ * ALREADY-RUNNING game's own libhl.dll build used. Here, by contrast, we compiled
+ * hl_code_read ourselves, so the vendored headers describe that parse exactly - which is why
+ * hl_compat registers it as HLX_SRC_FILE_PARSE/HLX_VARIANT_V6_OLD and static-asserts the two
+ * stay identical (hl_compat.c). LIBHL_STATIC (CMakeLists.txt) keeps hl.h's HL_API as plain
+ * `extern`, matching hlcode_shim.c. */
 #include "hlmodule.h"
 
 typedef void *(WINAPI *HlDynCallFn)(void *closure, void **args, int nargs);
@@ -45,6 +46,13 @@ static HlLookupFindFn g_hlLookupFind;
 static HlAllocDynamicFn g_hlAllocDynamic;
 static HlAllocEnumFn g_hlAllocEnum;
 static HlWriteDynFn g_hlWriteDyn;
+
+static int g_hlBytecodeVersion = -1;
+
+int reflection_get_bytecode_version(void)
+{
+    return g_hlBytecodeVersion;
+}
 
 void reflection_resolve_setup(void *realLibhlModule)
 {
@@ -78,64 +86,6 @@ void reflection_resolve_setup(void *realLibhlModule)
     }
 }
 
-typedef struct {
-    void *t;
-    int nfields;
-    int nproto;
-    int size;
-    int nmethods;
-    int nbindings;
-    unsigned char pad_size;
-    unsigned char largest_field;
-    bool hasPtr;
-    void **methods;
-    int *fields_indexes;
-    void *bindings;
-    void *parent;
-    void *toStringFun;
-    void *compareFun;
-    void *castFun;
-    void *getFieldFun;
-    int nlookup;
-    int ninterfaces;
-    void *lookup;
-} hlx_runtime_obj_mirror_t;
-
-typedef struct {
-    void *t;
-    int hashed_name;
-    int field_index;
-} hlx_field_lookup_mirror_t;
-
-/* Mirrors both hl_type_fun and its nested `closure` sub-struct (same {args,ret,nargs,parent}
- * shape) - a bound closure's .t->fun union slot points here, and .parent recovers the original
- * full type stashed by hl_get_closure_type. */
-typedef struct {
-    void *args;
-    void *ret;
-    int nargs;
-    void *parent;
-} hlx_type_fun_mirror_t;
-
-/* Mirrors hl_type_enum's leading fields; name is first (unlike hl_type_obj). */
-typedef struct {
-    const unsigned short *name;
-    int nconstructs;
-    void *constructs;
-    void **global_value;
-} hlx_type_enum_mirror_t;
-
-/* Mirrors hl_enum_construct (hashlink/src/hl.h) in full - construct_enum_by_name below needs
- * every field (nparams/params/offsets), not just name, to allocate+fill a value generically. */
-typedef struct {
-    const unsigned short *name;
-    int nparams;
-    void **params; /* hl_type** */
-    int size;
-    bool hasptr;
-    int *offsets;
-} hlx_enum_construct_mirror_t;
-
 void *resolve_type_by_name(const unsigned short *typeName)
 {
     if (!typeName) {
@@ -151,14 +101,22 @@ void *resolve_type_by_name(const unsigned short *typeName)
         hlx_log(HLX_LOG_ERROR, "[hlx-boot] resolve_type_by_name: ucmp not resolved - returning null");
         return NULL;
     }
+    if (!hl_compat_ctx_for(codePtr)) {
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] resolve_type_by_name: live hl_code has no validated hl_compat context - returning null");
+        return NULL;
+    }
 
+    int ntypes = hl_compat_ntypes(codePtr);
     void *result = NULL;
     bool ok = false;
     __try {
-        hlx_code_mirror_t *code = (hlx_code_mirror_t *)codePtr;
-        hlx_type_mirror_t *types = (hlx_type_mirror_t *)code->types;
-        for (int i = 0; i < code->ntypes; i++) {
-            hlx_type_mirror_t *t = &types[i];
+        bool faulted = false;
+        for (int i = 0; i < ntypes; i++) {
+            hlx_type_mirror_t *t = (hlx_type_mirror_t *)hl_compat_get_type(codePtr, i);
+            if (!t) {
+                faulted = true;
+                break;
+            }
             const unsigned short *candidateName = NULL;
             if (t->kind == HOBJ_KIND) {
                 hlx_type_obj_mirror_t *obj = (hlx_type_obj_mirror_t *)t->objPtr;
@@ -176,12 +134,12 @@ void *resolve_type_by_name(const unsigned short *typeName)
                 break;
             }
         }
-        ok = true;
+        ok = !faulted;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         ok = false;
     }
     if (!ok) {
-        hlx_log(HLX_LOG_ERROR, "[hlx-boot] resolve_type_by_name: code->types scan faulted - returning null");
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] resolve_type_by_name: hl_compat types scan faulted - returning null");
         return NULL;
     }
 
@@ -349,12 +307,6 @@ void *resolve_member_by_name(const void *resolvedType, const unsigned short *mem
 
 HLX_NATIVE_EXPORT(hlp_hlx_resolve_member, "PBBB_B", resolve_member_by_name)
 
-typedef struct {
-    const unsigned short *name;
-    void *t;
-    int hashed_name;
-} hlx_obj_field_mirror_t;
-
 typedef enum {
     STATIC_LOOKUP_FAULT,
     STATIC_LOOKUP_NOT_FOUND,
@@ -366,15 +318,6 @@ typedef enum {
 /* Every static method is a function-typed FIELD on a compiler-generated "$Helper" companion
  * type; the field->function mapping is that type's own `bindings` array - pure module-structural
  * data, available before any live object or static-initializer timing matters. */
-/* Mirrors hl_runtime_binding. `fid` is a GLOBAL field index across the super chain, not local.
- * `closure==NULL` means `ptr` is a pre-built unbound vclosure; `closure!=NULL` means `ptr` is a
- * raw function pointer instead - do not misread one as the other. */
-typedef struct {
-    void *ptr;
-    void *closure;
-    int fid;
-} hlx_runtime_binding_mirror_t;
-
 static StaticLookupResult LookupStaticOnCompanionType(void *companionType, const unsigned short *memberName,
                                                        void **outAddr, void **outType)
 {
@@ -532,18 +475,18 @@ HLX_NATIVE_EXPORT(hlp_hlx_resolve_static_member, "PBBB_B", resolve_static_member
  * slot typed to this companion, refusing on 0 or >1 matches rather than guessing. */
 static void *FindCompanionBoxViaGlobalsScan(const void *companionType)
 {
-    hlx_code_mirror_t *code = (hlx_code_mirror_t *)module_get_code();
+    void *code = module_get_code();
     unsigned char *globalsData = (unsigned char *)module_get_globals_data();
     int *globalsIndexes = module_get_globals_indexes();
-    if (!code || !code->globals || !globalsData || !globalsIndexes) return NULL;
+    if (!code || !globalsData || !globalsIndexes) return NULL;
 
+    int nglobals = hl_compat_nglobals(code);
     void *result = NULL;
     __try {
-        void **globals = code->globals;
         int matchIndex = -1;
         int matchCount = 0;
-        for (int i = 0; i < code->nglobals; i++) {
-            if (globals[i] == companionType) {
+        for (int i = 0; i < nglobals; i++) {
+            if (hl_compat_get_global(code, i) == companionType) {
                 matchIndex = i;
                 matchCount++;
             }
@@ -687,51 +630,6 @@ void *get_static_companion_instance(const void *resolvedType)
 
 HLX_NATIVE_EXPORT(hlp_hlx_get_static_companion_instance, "PB_D", get_static_companion_instance)
 
-/* Must mirror hl_function in FULL, not just `type` - this struct is indexed as an array
- * element (functions[pos]), so a truncated mirror scales every nonzero index to the wrong
- * byte offset and silently reads garbage from neighboring elements.
- *
- * Only .type/.findex are ever read off this LIVE-module mirror (by ResolveFunctionByFindex,
- * for FilterCandidatesByArgCount/construct_instance/construct_instance_by_name) - hence the
- * untyped void* for the rest. regs/ops are NOT read through this mirror: the New+Call
- * constructor scan now walks a FRESH, independently-parsed hl_code (real hl_function/
- * hl_opcode from vendor/hashlink/hlmodule.h, see reflection_init_constructor_table below),
- * never the live module's own (potentially freed) ops/regs arena. */
-typedef struct {
-    int findex;
-    int nregs;
-    int nops;
-    int ref;
-    void *type;
-    void *regs;
-    void *ops;
-    void *debug;
-    void *obj;
-    void *field;
-} hlx_function_mirror_t;
-
-typedef struct {
-    int findex;
-    int nregs;
-    int nops;
-    int ref;
-    int nassigns;
-    void *type;
-    void *regs;
-    void *ops;
-    void *debug;
-    void *assigns;
-    void *obj;
-    void *field;
-} hlx_function_mirror_v6_t;
-
-static int g_hlBytecodeVersion = -1;
-
-int reflection_get_bytecode_version(void)
-{
-    return g_hlBytecodeVersion;
-}
-
 /* Shared tail of call_resolved/construct_instance: builds a synthetic vclosure (hasValue=0,
  * so hl_dyn_call never unwraps a receiver from it - the receiver, if any, is already
  * elements[0]) and invokes it. */
@@ -758,7 +656,7 @@ static void *InvokeVClosure(const void *targetFun, const void *realType, void **
 }
 
 /* functions_ptrs is indexed directly by findex; functions_indexes is a separate table,
- * needed only to find a function's position in code->functions for its .type - do not
+ * needed only to find a function's position in hl_code.functions for its .type - do not
  * conflate the two. */
 static bool ResolveFunctionByFindex(int findex, void **outFn, void **outRealType)
 {
@@ -770,27 +668,22 @@ static bool ResolveFunctionByFindex(int findex, void **outFn, void **outRealType
         return false;
     }
 
+    int nfunctions = hl_compat_nfunctions(codePtr);
+    int nnatives = hl_compat_nnatives(codePtr);
+
     bool ok = false;
     __try {
-        hlx_code_mirror_t *code = (hlx_code_mirror_t *)codePtr;
-        int total = code->nfunctions + code->nnatives;
+        int total = nfunctions + nnatives;
         if ((unsigned)findex >= (unsigned)total) {
             ok = false;
         } else {
             void *fn = functionsPtrs[findex];
             int pos = functionsIndexes[findex];
-            if (!fn || pos < 0 || pos >= code->nfunctions) {
+            if (!fn || pos < 0 || pos >= nfunctions) {
                 ok = false;
             } else {
                 *outFn = fn;
-                if (g_hlBytecodeVersion >= 6) {
-                    hlx_function_mirror_v6_t *functions = (hlx_function_mirror_v6_t *)code->functions;
-                    *outRealType = functions[pos].type;
-                } else {
-                    hlx_function_mirror_t *functions = (hlx_function_mirror_t *)code->functions;
-                    *outRealType = functions[pos].type;
-                }
-                ok = true;
+                ok = hl_compat_function_type(codePtr, pos, outRealType);
             }
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -1545,7 +1438,11 @@ void reflection_init_constructor_table(void)
         return;
     }
 
-    g_ctorNameTableSize = NextPow2(code->ntypes > 0 ? code->ntypes * 2 + 16 : 1024);
+    /* Before any accessor below touches `code`: attach its FILE_PARSE context and snapshot the
+     * type samples hl_compat_detect_live() later cross-validates the live hl_code against. */
+    hl_compat_register_file_code(code, bytecodeVersion);
+
+    g_ctorNameTableSize = NextPow2(hl_compat_ntypes(code) > 0 ? hl_compat_ntypes(code) * 2 + 16 : 1024);
     g_ctorNameBuckets = (hlx_ctor_name_bucket_t *)calloc((size_t)g_ctorNameTableSize, sizeof(hlx_ctor_name_bucket_t));
     if (!g_ctorNameBuckets) {
         hlx_log(HLX_LOG_ERROR, "[hlx-boot] reflection_init_constructor_table: allocation of a %d-slot table failed - "
@@ -1555,12 +1452,18 @@ void reflection_init_constructor_table(void)
         return;
     }
 
+    int nfunctions = hl_compat_nfunctions(code);
     g_totalCandidateSites = 0;
     int functionsScanned = 0, functionsFaulted = 0;
-    for (int i = 0; i < code->nfunctions; i++) {
+    for (int i = 0; i < nfunctions; i++) {
+        const hl_function *fn = (const hl_function *)hl_compat_function_at(code, i);
+        if (!fn) {
+            functionsFaulted++;
+            continue;
+        }
         bool ok = true;
         __try {
-            ScanFileFunctionForConstructors(&code->functions[i]);
+            ScanFileFunctionForConstructors(fn);
         } __except (EXCEPTION_EXECUTE_HANDLER) {
             ok = false;
         }
@@ -1580,7 +1483,7 @@ void reflection_init_constructor_table(void)
             "scanned (%d faulted), %d New+Call candidate site(s) found, %d distinct type(s) with a candidate "
             "(%d unambiguous by raw findex alone, %d still ambiguous pending per-call arg-count "
             "filtering in construct_instance_by_name)",
-            bootPath, (unsigned long)(GetTickCount() - startTick), functionsScanned, code->nfunctions, functionsFaulted,
+            bootPath, (unsigned long)(GetTickCount() - startTick), functionsScanned, nfunctions, functionsFaulted,
             g_totalCandidateSites, distinctTypesWithCandidates, unambiguousByRawFindex, stillAmbiguousByRawFindex);
 
     staticfields_index_entrypoint(code);

@@ -1,6 +1,7 @@
 #include "boot.h"
 #include "module.h"
 #include "reflection.h"
+#include "hl_compat.h"
 #include "log.h"
 #include "config.h"
 #include "hlx_common.h"
@@ -134,50 +135,6 @@ static void EagerLoadPluginHdlls(void)
     hlx_log(HLX_LOG_DEBUG, "[hlx-boot] LoadPlugin: %d loaded, %d failed (from %s\\*\\*.hdll)", loaded, failed, pluginsDir);
 }
 
-/* Mirrors hl_setup_t field-for-field so load_plugin's offset matches exactly. */
-typedef struct {
-    void *file_path;
-    void *sys_args;
-    int sys_nargs;
-    void *throw_jump;
-    void *resolve_symbol;
-    void *capture_stack;
-    void *reload_check;
-    void *static_call;
-    void *get_wrapper;
-    void *profile_event;
-    void *before_exit;
-    void *vtune_init;
-    void *load_plugin;
-    void *resolve_type;
-    bool static_call_ref;
-    int closure_stack_capture;
-    bool is_debugger_enabled;
-    bool is_debugger_attached;
-} hlx_setup_mirror_t;
-
-typedef struct {
-    void *file_path;
-    void *sys_args;
-    int sys_nargs;
-    void *throw_jump;
-    void *resolve_symbol;
-    void *capture_stack;
-    void *capture_break_context;
-    void *reload_check;
-    void *static_call;
-    void *get_wrapper;
-    void *profile_event;
-    void *before_exit;
-    void *vtune_init;
-    void *load_plugin;
-    void *resolve_type;
-    bool static_call_ref;
-    int closure_stack_capture;
-    bool is_debugger_enabled;
-    bool is_debugger_attached;
-} hlx_setup_mirror_v6_t;
-
 static const char *LogLevelName(HlxLogLevel level)
 {
     switch (level) {
@@ -189,7 +146,7 @@ static const char *LogLevelName(HlxLogLevel level)
 }
 
 static HMODULE g_realLibhl;
-static hlx_setup_mirror_t *g_setup;
+static void *g_setup;
 
 typedef void *(WINAPI *HlDynCallSafeFn)(void *closure, void **args, int nargs, void *isExcept);
 static HlDynCallSafeFn g_realHlDynCallSafe;
@@ -201,12 +158,12 @@ static void ResolveSetup(void)
         hlx_log(HLX_LOG_ERROR, "[hlx-boot] FATAL: libhl.dll not found in process");
         return;
     }
-    g_setup = (hlx_setup_mirror_t *)GetProcAddress(g_realLibhl, "hl_setup");
+    g_setup = (void *)GetProcAddress(g_realLibhl, "hl_setup");
     if (!g_setup) {
         hlx_log(HLX_LOG_ERROR, "[hlx-boot] hl_setup export not found on libhl.dll");
         return;
     }
-    hlx_log(HLX_LOG_DEBUG, "[hlx-boot] libhl.dll base=%p hl_setup=%p (load_plugin field at %p)", (void *)g_realLibhl, (void *)g_setup, (void *)&g_setup->load_plugin);
+    hlx_log(HLX_LOG_DEBUG, "[hlx-boot] libhl.dll base=%p hl_setup=%p", (void *)g_realLibhl, g_setup);
 
     reflection_resolve_setup(g_realLibhl);
     hlx_gc_resolve_setup(g_realLibhl); /* shared by registry.c and bus.c - see hlx_common.h */
@@ -217,6 +174,8 @@ static void ResolveSetup(void)
      * right alongside the rest of process-attach-time setup, not later in
      * hlx_mods_loaded_impl. */
     reflection_init_constructor_table();
+
+    hlx_log(HLX_LOG_DEBUG, "[hlx-boot] hl_setup.load_plugin=%p (bytecode v%d)", hl_compat_setup_load_plugin(g_setup, reflection_get_bytecode_version()), reflection_get_bytecode_version());
 }
 
 static hlx_vclosure_mirror_t g_registerPrefixClosure;
@@ -299,9 +258,7 @@ static void *WINAPI HookedHlDynCallSafe(void *closure, void **args, int nargs, v
         // so reflection works when mods run their main()
         module_recover(g_bootTargetFun);
 
-        bool hasLoadPlugin = g_setup && (reflection_get_bytecode_version() >= 6
-            ? ((hlx_setup_mirror_v6_t *)g_setup)->load_plugin != NULL
-            : g_setup->load_plugin != NULL);
+        bool hasLoadPlugin = g_setup && hl_compat_setup_load_plugin(g_setup, reflection_get_bytecode_version()) != NULL;
         if (g_realLibhl && hasLoadPlugin) {
             HlSysLoadPluginFn loadPlugin = (HlSysLoadPluginFn)GetProcAddress(g_realLibhl, "hl_sys_load_plugin");
             if (loadPlugin) {

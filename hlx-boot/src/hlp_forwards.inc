@@ -2274,3 +2274,844 @@ __declspec(dllexport) void * WINAPI hlp_value_to_string(const char **sign)
     if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_value_to_string");
     return real ? ((HlpFn)real)(sign) : NULL;
 }
+
+/* Plain hl_sys_* forwarders (live game exports both hl_sys_* and hlp_sys_*) */
+__declspec(dllexport) void * WINAPI hl_sys_load_plugin(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hl_sys_load_plugin");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hl_sys_print(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hl_sys_print");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+__declspec(dllexport) void * WINAPI hlp_add_root(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_add_root");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_alloc_buffer(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_alloc_buffer");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_alloc_closure_ptr(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_alloc_closure_ptr");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_alloc_closure_void(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_alloc_closure_void");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_alloc_dynamic(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_alloc_dynamic");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_alloc_dynbool(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_alloc_dynbool");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_alloc_dynobj(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_alloc_dynobj");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_alloc_enum(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_alloc_enum");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_alloc_executable_memory(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_alloc_executable_memory");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_alloc_init(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_alloc_init");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_alloc_strbytes(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_alloc_strbytes");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_alloc_virtual(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_alloc_virtual");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_assert(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_assert");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_buffer_char(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_buffer_char");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_buffer_content(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_buffer_content");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_buffer_cstr(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_buffer_cstr");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_buffer_length(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_buffer_length");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_buffer_str(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_buffer_str");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_buffer_str_sub(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_buffer_str_sub");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_buffer_val(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_buffer_val");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_cache_free(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_cache_free");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_condition_free(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_condition_free");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_copy_bytes(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_copy_bytes");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_date_from_string2(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_date_from_string2");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_date_from_time2(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_date_from_time2");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_date_get_inf2(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_date_get_inf2");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_date_get_time2(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_date_get_time2");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_date_get_tz_offset2(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_date_get_tz_offset2");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_date_get_utc_inf2(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_date_get_utc_inf2");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_date_new2(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_date_new2");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_date_now2(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_date_now2");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_date_to_string2(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_date_to_string2");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_detect_debugger(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_detect_debugger");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_dump_stack(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_dump_stack");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_dyn_call(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_dyn_call");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_dyn_call_obj(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_dyn_call_obj");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_dyn_call_safe(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_dyn_call_safe");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_dyn_castd(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_dyn_castd");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_dyn_castf(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_dyn_castf");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_dyn_casti(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_dyn_casti");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_dyn_casti64(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_dyn_casti64");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_dyn_castp(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_dyn_castp");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_dyn_getd(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_dyn_getd");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_dyn_getf(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_dyn_getf");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_dyn_geti(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_dyn_geti");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_dyn_geti64(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_dyn_geti64");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_dyn_getp(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_dyn_getp");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_dyn_setd(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_dyn_setd");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_dyn_setf(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_dyn_setf");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_dyn_seti(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_dyn_seti");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_dyn_seti64(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_dyn_seti64");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_dyn_setp(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_dyn_setp");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_fatal_error(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_fatal_error");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_fatal_fmt(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_fatal_fmt");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_flush_proto(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_flush_proto");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_free(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_free");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_free_executable_memory(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_free_executable_memory");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_from_utf8(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_from_utf8");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_gc_alloc_gen(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_gc_alloc_gen");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_gc_get_mark_threads(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_gc_get_mark_threads");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_gc_get_memsize(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_gc_get_memsize");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_gc_get_page(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_gc_get_page");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_gc_mark_grow(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_gc_mark_grow");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_gc_set_dump_types(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_gc_set_dump_types");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_gc_threads_info(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_gc_threads_info");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_get_obj_proto(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_get_obj_proto");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_get_obj_rt(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_get_obj_rt");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_get_thread(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_get_thread");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_get_thread_id(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_get_thread_id");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_global_free(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_global_free");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_global_init(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_global_init");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_global_lock(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_global_lock");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_guid_str(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_guid_str");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_hash_gen(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_hash_gen");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_hash_utf8(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_hash_utf8");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_init_enum(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_init_enum");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_init_virtual(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_init_virtual");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_is_blocking(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_is_blocking");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_is_dynamic(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_is_dynamic");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_is_gc_ptr(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_is_gc_ptr");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_is_ptr(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_is_ptr");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_lookup_find(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_lookup_find");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_lookup_insert(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_lookup_insert");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_make_dyn(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_make_dyn");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_make_fun_wrapper(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_make_fun_wrapper");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_malloc(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_malloc");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_mark_size(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_mark_size");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_null_access(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_null_access");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_obj_field_fetch(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_obj_field_fetch");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_pad_struct(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_pad_struct");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_prim_not_loaded(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_prim_not_loaded");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_print_uncaught_exception(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_print_uncaught_exception");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_register_thread(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_register_thread");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_remove_root(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_remove_root");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_rethrow(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_rethrow");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_safe_cast(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_safe_cast");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_same_type(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_same_type");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_setup(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_setup");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_sys_init(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_sys_init");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_sys_stat2(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_sys_stat2");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_thread_id(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_thread_id");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_thread_start(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_thread_start");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_thread_yield(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_thread_yield");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_throw(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_throw");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_throw_buffer(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_throw_buffer");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_tls_free(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_tls_free");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_to_string(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_to_string");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_to_utf16(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_to_utf16");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_to_utf8(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_to_utf8");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_to_virtual(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_to_virtual");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_track(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_track");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_type_size(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_type_size");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_unregister_thread(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_unregister_thread");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_utf8_length(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_utf8_length");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_virtual_make_value(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_virtual_make_value");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_wrapper_call(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_wrapper_call");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_write_dyn(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_write_dyn");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+
+__declspec(dllexport) void * WINAPI hlp_zalloc(const char **sign)
+{
+    static void *real = NULL;
+    if (!real) real = (void *)GetProcAddress(g_realLibhl, "hlp_zalloc");
+    return real ? ((HlpFn)real)(sign) : NULL;
+}
+

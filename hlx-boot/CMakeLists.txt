@@ -12,6 +12,7 @@ set(CMAKE_C_STANDARD 11)
 
 include_directories(include)
 include_directories(vendor/hashlink)
+include_directories(vendor/hashlink_compat)
 include_directories(vendor/minhook/include)
 
 add_library(hlx-boot SHARED
@@ -19,6 +20,7 @@ add_library(hlx-boot SHARED
     src/bus.c
     src/config.c
     src/driver.c
+    src/hl_compat.c
     src/hlcode_shim.c
     src/hlx_common.c
     src/log.c

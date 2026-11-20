@@ -241,6 +241,15 @@ static void hl_read_type( hl_reader *r, hl_type *t ) {
 				c->offsets = (int*)hl_malloc(&r->code->alloc,sizeof(int)*c->nparams);
 				for(j=0;j<c->nparams;j++)
 					c->params[j] = hl_get_type(r);
+				/* v7: enum construct parameter names */
+				c->pnames = NULL;
+				if( r->code->version >= 7 && c->nparams ) {
+					c->pnames = (const uchar**)hl_malloc(&r->code->alloc,sizeof(uchar*)*c->nparams);
+					for(j=0;j<c->nparams;j++) {
+						int k = UINDEX();
+						c->pnames[j] = k > 0 && k - 1 < r->code->nstrings ? hl_get_ustring(r->code,k - 1) : NULL;
+					}
+				}
 			}
 		}
 		break;
@@ -342,6 +351,10 @@ static void hl_read_function( hl_reader *r, hl_function *f ) {
 	f->ops = (hl_opcode*)hl_malloc(&r->code->falloc, f->nops * sizeof(hl_opcode));
 	for(i=0;i<f->nops;i++)
 		hl_read_opcode(r, f, f->ops+i);
+	if( r->code->version >= 7 ) {
+		int k = UINDEX();
+		(void)k; /* consumed but not stored - FILE_PARSE output is v6-old layout */
+	}
 }
 
 #undef CHK_ERROR
@@ -428,7 +441,7 @@ hl_code *hl_code_read( const unsigned char *data, int size, char **error_msg ) {
 	hl_alloc alloc;
 	int i;
 	int flags;
-	int max_version = 6;
+	int max_version = 7;
 	hl_alloc_init(&alloc);
 	c = hl_zalloc(&alloc,sizeof(hl_code));
 	c->alloc = alloc;
@@ -440,6 +453,14 @@ hl_code *hl_code_read( const unsigned char *data, int size, char **error_msg ) {
 	if( c->version <= 1 || c->version > max_version ) {
 		printf("Found version %d while HL %d.%d supports up to %d\n",c->version,HL_VERSION>>16,(HL_VERSION>>8)&0xFF,max_version);
 		EXIT("Unsupported bytecode version");
+	}
+	if( c->version >= 7 ) {
+		int file_size = hl_read_i32(r);
+		unsigned char build_id[HL_BUILD_ID_SIZE];
+		for(i=0;i<HL_BUILD_ID_SIZE;i++)
+			build_id[i] = READ();
+		if( file_size != size )
+			EXIT("Truncated bytecode");
 	}
 	flags = UINDEX();
 	c->nints = UINDEX();
@@ -536,6 +557,29 @@ hl_code *hl_code_read( const unsigned char *data, int size, char **error_msg ) {
 
 void hl_code_free( hl_code *c ) {
 	hl_free(&c->falloc);
+}
+
+int hl_code_read_header( const unsigned char *data, int size, int *file_size, unsigned char *build_id ) {
+	*file_size = -1;
+	if( size < 4 || data[0] != 'H' || data[1] != 'L' || data[2] != 'B' )
+		return -1;
+	int version = data[3];
+	if( version < 7 ) return version;
+	if( size < HL_HEADER_SIZE ) return -1;
+	*file_size = data[4] | (data[5] << 8) | (data[6] << 16) | (data[7] << 24);
+	memcpy(build_id, data + 8, HL_BUILD_ID_SIZE);
+	return version;
+}
+
+/* FILE_PARSE has no lnames table - always returns NULL */
+const uchar *hl_function_lname( hl_code *code, hl_function *f ) {
+	(void)code; (void)f;
+	return NULL;
+}
+
+int hl_code_type_index( hl_code *c, hl_type *t ) {
+	/* FILE_PARSE uses v6-old contiguous types array: types is hl_type*, so c->types + i is the address */
+	return (int)(t - c->types);
 }
 
 static const unsigned int crc32_table[] =

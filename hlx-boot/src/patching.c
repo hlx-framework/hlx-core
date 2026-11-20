@@ -1,6 +1,7 @@
 #include "patching.h"
 #include "reflection.h"
 #include "module.h"
+#include "hl_compat.h"
 #include "boot.h"
 #include "hlx_common.h"
 #include <MinHook.h>
@@ -34,9 +35,9 @@ static void EnsureFunctionBoundaries(void)
         return;
     }
 
-    int n = ((hlx_code_mirror_t *)codePtr)->nfunctions;
+    int n = hl_compat_nfunctions(codePtr);
     if (n <= 0) {
-        hlx_log(HLX_LOG_ERROR, "[hlx-boot] EnsureFunctionBoundaries: code->nfunctions=%d", n);
+        hlx_log(HLX_LOG_ERROR, "[hlx-boot] EnsureFunctionBoundaries: hl_compat_nfunctions=%d", n);
         return;
     }
 
